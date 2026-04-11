@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OmniStream Studio</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+
+  <body>
+    <div id="app">
+      <header class="title-bar" data-tauri-drag-region>
+        <span class="title">OmniStream Studio</span>
+        <div class="window-controls">
+          <button class="minimize" id="minimize-btn">─</button>
+          <button class="close" id="close-btn">×</button>
+        </div>
+      </header>
+
+      <main class="content">
+        <div class="form-group">
+          <label for="platform">Platform</label>
+          <select id="platform">
+            <option value="twitch">Twitch</option>
+            <option value="kick">Kick</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="stream-key">Stream Key</label>
+          <div class="input-wrapper">
+            <input type="password" id="stream-key" placeholder="Enter your stream key" />
+            <button class="toggle-visibility" id="toggle-key" title="Show/Hide">👁</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="ingest">Ingest</label>
+          <select id="ingest">
+            <option value="">Loading...</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="keyint">Keyframe Interval</label>
+          <select id="keyint">
+            <option value="30">1 second</option>
+            <option value="60" selected>2 seconds</option>
+            <option value="120">4 seconds</option>
+          </select>
+        </div>
+
+        <button class="action-btn" id="action-btn">GO LIVE</button>
+        <button class="action-btn stop-btn" id="stop-btn">STOP</button>
+
+        <div class="channel-status">
+          <span class="channel-indicator" id="channel-indicator"></span>
+          <span class="channel-text" id="channel-text">Checking...</span>
+        </div>
+
+        <div class="status-bar">
+          <span class="status-indicator" id="status-indicator"></span>
+          <span class="status-text" id="status-text">Ready</span>
+          <span class="timer" id="timer"></span>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

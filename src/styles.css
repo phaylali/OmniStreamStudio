@@ -1,0 +1,277 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg-primary: #1a1a1a;
+  --bg-secondary: #252525;
+  --bg-input: #2a2a2a;
+  --text-primary: #e0e0e0;
+  --text-secondary: #888888;
+  --accent: #9146ff;
+  --accent-hover: #772ce8;
+  --success: #00d084;
+  --error: #ff4d4d;
+  --border: #3a3a3a;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  overflow: hidden;
+  user-select: none;
+}
+
+#app {
+  width: 400px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.title-bar {
+  height: 28px;
+  background-color: var(--bg-secondary);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 8px;
+  -webkit-app-region: drag;
+  cursor: move;
+}
+
+.title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.window-controls {
+  display: flex;
+  gap: 4px;
+  -webkit-app-region: no-drag;
+}
+
+.window-controls button {
+  width: 28px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: background-color 0.15s;
+}
+
+.window-controls button:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.window-controls .close:hover {
+  background-color: var(--error);
+  color: white;
+}
+
+.content {
+  flex: 1;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.form-group label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.form-group select,
+.form-group input {
+  height: 32px;
+  background-color: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 10px;
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.form-group select:hover,
+.form-group input:hover {
+  border-color: #555;
+}
+
+.form-group select:focus,
+.form-group input:focus {
+  border-color: var(--accent);
+}
+
+.input-wrapper {
+  display: flex;
+  gap: 4px;
+}
+
+.input-wrapper input {
+  flex: 1;
+}
+
+.toggle-visibility {
+  width: 32px;
+  background-color: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.toggle-visibility:hover {
+  background-color: var(--bg-secondary);
+}
+
+.action-btn {
+  height: 40px;
+  background-color: var(--accent);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s, transform 0.1s;
+}
+
+.action-btn:hover {
+  background-color: var(--accent-hover);
+}
+
+.action-btn:active {
+  transform: scale(0.98);
+}
+
+.action-btn.live {
+  background-color: var(--error);
+}
+
+.action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.stop-btn {
+  height: 40px;
+  background-color: var(--error);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s, transform 0.1s;
+}
+
+.stop-btn:hover {
+  filter: brightness(1.1);
+}
+
+.stop-btn:active {
+  transform: scale(0.98);
+}
+
+.stop-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.status-bar {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  background-color: var(--bg-secondary);
+  border-radius: 6px;
+}
+
+.status-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--text-secondary);
+}
+
+.status-indicator.live {
+  background-color: var(--success);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.status-indicator.error {
+  background-color: var(--error);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.status-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.timer {
+  margin-left: auto;
+  font-size: 12px;
+  font-family: monospace;
+  color: var(--text-primary);
+}
+
+.channel-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  background-color: var(--bg-secondary);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.channel-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--text-secondary);
+}
+
+.channel-indicator.live {
+  background-color: var(--success);
+}
+
+.channel-indicator.offline {
+  background-color: var(--text-secondary);
+}
+
+.channel-indicator.error {
+  background-color: var(--error);
+}
+
+.channel-text {
+  color: var(--text-secondary);
+}
