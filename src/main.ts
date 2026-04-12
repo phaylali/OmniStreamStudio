@@ -62,6 +62,7 @@ const closeBtn = document.getElementById("close-btn") as HTMLButtonElement;
 const channelIndicator = document.getElementById("channel-indicator") as HTMLElement;
 const channelText = document.getElementById("channel-text") as HTMLElement;
 const keyintSelect = document.getElementById("keyint") as HTMLSelectElement;
+const encoderSelect = document.getElementById("encoder") as HTMLSelectElement;
 
 let channelCheckInterval: number | null = null;
 
@@ -154,10 +155,12 @@ async function startStream() {
 
   try {
     const keyint = keyintSelect.value;
+    const encoder = encoderSelect.value;
     const result = await invoke<string>("start_stream", {
       platform: state.platform,
       url: fullUrl,
       keyint: parseInt(keyint, 10),
+      encoderType: encoder,
     });
     console.log("Start result:", result);
     
@@ -255,3 +258,50 @@ updateIngestDropdown();
 loadDefaultKey();
 startChannelCheck();
 updateStatus("Ready");
+
+async function initEncoders() {
+  try {
+    const encoders = await invoke<any[]>("get_available_encoders");
+
+    encoderSelect.innerHTML = `<option value="auto">Auto (Recommended)</option>`;
+
+    // Group encoders by type
+    const gpuEncoders = encoders.filter(e => e.type_ === "gpu");
+    const igpuEncoders = encoders.filter(e => e.type_ === "igpu");
+    const cpuEncoders = encoders.filter(e => e.type_ === "cpu");
+
+    // Add detected encoders to dropdown
+    gpuEncoders.forEach(encoder => {
+      encoderSelect.innerHTML += `<option value="gpu">${encoder.name}</option>`;
+    });
+
+    igpuEncoders.forEach(encoder => {
+      encoderSelect.innerHTML += `<option value="igpu">${encoder.name}</option>`;
+    });
+
+    cpuEncoders.forEach(encoder => {
+      encoderSelect.innerHTML += `<option value="cpu">${encoder.name}</option>`;
+    });
+
+    // If no encoders of a type found, add generic options
+    if (gpuEncoders.length === 0) {
+      encoderSelect.innerHTML += `<option value="gpu">GPU (Hardware)</option>`;
+    }
+    if (igpuEncoders.length === 0) {
+      encoderSelect.innerHTML += `<option value="igpu">Integrated GPU</option>`;
+    }
+    if (cpuEncoders.length === 0) {
+      encoderSelect.innerHTML += `<option value="cpu">CPU (Software)</option>`;
+    }
+  } catch (error) {
+    console.error("Failed to load encoders:", error);
+    encoderSelect.innerHTML = `
+      <option value="auto">Auto (Recommended)</option>
+      <option value="gpu">GPU (Hardware)</option>
+      <option value="igpu">Integrated GPU</option>
+      <option value="cpu">CPU (Software)</option>
+    `;
+  }
+}
+
+initEncoders();
