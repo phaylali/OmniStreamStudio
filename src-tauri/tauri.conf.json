@@ -15,8 +15,10 @@
       {
         "title": "OmniStream Studio",
         "width": 400,
-        "height": 480,
-        "resizable": false,
+        "height": 500,
+        "minWidth": 400,
+        "minHeight": 200,
+        "resizable": true,
         "center": true,
         "decorations": false,
         "transparent": false
@@ -27,8 +29,7 @@
     }
   },
   "bundle": {
-    "active": true,
-    "targets": "all",
+    "active": false,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

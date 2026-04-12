@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 
 type Platform = "twitch" | "kick";
 
@@ -9,6 +9,13 @@ interface StreamState {
   ingestUrl: string;
   isLive: boolean;
   startTime: number | null;
+}
+
+interface MonitorInfo {
+  id: string;
+  name: string;
+  resolution: string;
+  is_default: boolean;
 }
 
 // Default keys loaded from .env at build time
@@ -46,6 +53,7 @@ let state: StreamState = {
   startTime: null,
 };
 
+let availableMonitors: MonitorInfo[] = [];
 let timerInterval: number | null = null;
 
 const platformSelect = document.getElementById("platform") as HTMLSelectElement;
@@ -62,8 +70,24 @@ const closeBtn = document.getElementById("close-btn") as HTMLButtonElement;
 const channelIndicator = document.getElementById("channel-indicator") as HTMLElement;
 const channelText = document.getElementById("channel-text") as HTMLElement;
 const keyintSelect = document.getElementById("keyint") as HTMLSelectElement;
+const encoderSelect = document.getElementById("encoder") as HTMLSelectElement;
+const monitorSelect = document.getElementById("monitor") as HTMLSelectElement;
+const qualitySelect = document.getElementById("quality") as HTMLSelectElement;
 
 let channelCheckInterval: number | null = null;
+
+async function syncWindowSize() {
+  const win = getCurrentWindow();
+  const app = document.getElementById("app");
+  if (app) {
+    // Small delay to ensure DOM has settled
+    setTimeout(async () => {
+      const height = app.scrollHeight;
+      console.log("Setting window height to:", height);
+      await win.setSize(new LogicalSize(400, height));
+    }, 10);
+  }
+}
 
 async function checkChannelStatus() {
   if (!CHANNEL_NAME) {
@@ -87,6 +111,8 @@ async function checkChannelStatus() {
     channelIndicator.className = "channel-indicator error";
     const errorMessage = error?.message || error?.toString() || "Unknown error";
     channelText.textContent = `Error: ${errorMessage}`;
+  } finally {
+    syncWindowSize();
   }
 }
 
@@ -114,6 +140,7 @@ function loadDefaultKey() {
 function updateStatus(text: string, statusClass: "live" | "error" | "" = "") {
   statusText.textContent = text;
   statusIndicator.className = "status-indicator" + (statusClass ? ` ${statusClass}` : "");
+  syncWindowSize();
 }
 
 function startTimer() {
@@ -138,7 +165,7 @@ function stopTimer() {
   state.startTime = null;
 }
 
-async function startStream() {
+async function startStream(silent = false) {
   const streamKey = streamKeyInput.value.trim();
   if (!streamKey) {
     updateStatus("Stream key required", "error");
@@ -148,16 +175,28 @@ async function startStream() {
   const ingestUrl = ingestSelect.value;
   const fullUrl = `${ingestUrl}/${streamKey}`;
 
-  actionBtn.disabled = true;
-  actionBtn.textContent = "Starting...";
-  updateStatus("Starting stream... Check console for details.");
+  if (!silent) {
+    actionBtn.disabled = true;
+    actionBtn.textContent = "Starting...";
+    updateStatus("Starting stream... Check console for details.");
+  }
 
   try {
     const keyint = keyintSelect.value;
+    const encoder = encoderSelect.value;
+    const monitorId = monitorSelect.value;
+    const quality = qualitySelect.value;
+    const monitor = availableMonitors.find(m => m.id === monitorId);
+    const resolution = monitor ? monitor.resolution : "1920x1080";
+
     const result = await invoke<string>("start_stream", {
       platform: state.platform,
       url: fullUrl,
       keyint: parseInt(keyint, 10),
+      encoderType: encoder,
+      monitorId: monitorId,
+      resolution: resolution,
+      quality: quality,
     });
     console.log("Start result:", result);
     
@@ -166,7 +205,7 @@ async function startStream() {
     actionBtn.classList.add("live");
     actionBtn.disabled = false;
     updateStatus("Live", "live");
-    startTimer();
+    if (!silent) startTimer();
   } catch (error: any) {
     console.error("Stream error:", error);
     const errorMsg = error?.toString() || "Unknown error";
@@ -176,23 +215,29 @@ async function startStream() {
   }
 }
 
-async function stopStream() {
-  actionBtn.disabled = true;
-  actionBtn.textContent = "Stopping...";
-  updateStatus("Stopping stream...");
+async function stopStream(silent = false) {
+  if (!silent) {
+    actionBtn.disabled = true;
+    actionBtn.textContent = "Stopping...";
+    updateStatus("Stopping stream...");
+  }
 
   try {
     await invoke("stop_stream");
     state.isLive = false;
-    stopTimer();
-    actionBtn.textContent = "GO LIVE";
-    actionBtn.classList.remove("live");
-    actionBtn.disabled = false;
-    updateStatus("Ready");
+    if (!silent) {
+      stopTimer();
+      actionBtn.textContent = "GO LIVE";
+      actionBtn.classList.remove("live");
+      actionBtn.disabled = false;
+      updateStatus("Ready");
+    }
   } catch (error) {
     console.error("Stop error:", error);
-    updateStatus(`Error: ${error}`, "error");
-    actionBtn.disabled = false;
+    if (!silent) {
+      updateStatus(`Error: ${error}`, "error");
+      actionBtn.disabled = false;
+    }
   }
 }
 
@@ -234,6 +279,27 @@ stopBtn.addEventListener("click", () => {
   forceStopStream();
 });
 
+monitorSelect.addEventListener("change", async () => {
+  if (state.isLive) {
+    console.log("Monitor changed while live. Restarting stream for seamless switch...");
+    // Keep current startTime to not reset timer
+    const currentStartTime = state.startTime;
+    await stopStream(true); // silent stop
+    await startStream(true); // silent start
+    state.startTime = currentStartTime; 
+  }
+});
+
+qualitySelect.addEventListener("change", async () => {
+  if (state.isLive) {
+    console.log("Quality changed while live. Restarting stream...");
+    const currentStartTime = state.startTime;
+    await stopStream(true);
+    await startStream(true);
+    state.startTime = currentStartTime;
+  }
+});
+
 toggleKeyBtn.addEventListener("click", () => {
   streamKeyInput.type = streamKeyInput.type === "password" ? "text" : "password";
 });
@@ -255,3 +321,64 @@ updateIngestDropdown();
 loadDefaultKey();
 startChannelCheck();
 updateStatus("Ready");
+
+async function initEncoders() {
+  try {
+    const encoders = await invoke<any[]>("get_available_encoders");
+
+    encoderSelect.innerHTML = `<option value="auto">Auto (Recommended)</option>`;
+
+    // Group encoders by type
+    const gpuEncoders = encoders.filter(e => e.type_ === "gpu");
+    const igpuEncoders = encoders.filter(e => e.type_ === "igpu");
+    const cpuEncoders = encoders.filter(e => e.type_ === "cpu");
+
+    gpuEncoders.forEach(encoder => {
+      encoderSelect.innerHTML += `<option value="gpu">${encoder.name}</option>`;
+    });
+
+    igpuEncoders.forEach(encoder => {
+      encoderSelect.innerHTML += `<option value="igpu">${encoder.name}</option>`;
+    });
+
+    cpuEncoders.forEach(encoder => {
+      encoderSelect.innerHTML += `<option value="cpu">${encoder.name}</option>`;
+    });
+
+    if (gpuEncoders.length === 0) {
+      encoderSelect.innerHTML += `<option value="gpu">GPU (Hardware)</option>`;
+    }
+    if (igpuEncoders.length === 0) {
+      encoderSelect.innerHTML += `<option value="igpu">Integrated GPU</option>`;
+    }
+    if (cpuEncoders.length === 0) {
+      encoderSelect.innerHTML += `<option value="cpu">CPU (Software)</option>`;
+    }
+  } catch (error) {
+    console.error("Failed to load encoders:", error);
+    encoderSelect.innerHTML = `
+      <option value="auto">Auto (Recommended)</option>
+      <option value="gpu">GPU (Hardware)</option>
+      <option value="igpu">Integrated GPU</option>
+      <option value="cpu">CPU (Software)</option>
+    `;
+  } finally {
+    syncWindowSize();
+  }
+}
+
+async function initMonitors() {
+  try {
+    availableMonitors = await invoke<MonitorInfo[]>("get_monitors");
+    monitorSelect.innerHTML = availableMonitors
+      .map(m => `<option value="${m.id}" ${m.is_default ? "selected" : ""}>${m.name}</option>`)
+      .join("");
+  } catch (error) {
+    console.error("Failed to load monitors:", error);
+  } finally {
+    syncWindowSize();
+  }
+}
+
+initEncoders();
+initMonitors();

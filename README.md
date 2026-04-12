@@ -1,42 +1,41 @@
 # OmniStream Studio
 
-A lightweight, GPU-accelerated streaming application for Twitch and Kick.
+A lightweight, GPU-accelerated streaming application for Twitch and Kick. Designed for maximum performance and minimal distraction.
 
 ## Features
 
-- **GPU Hardware Encoding** - Uses AMD VCE (or NVENC/QuickSync as fallback) for minimal CPU usage
-- **Minimalist Interface** - Clean, distraction-free streaming controls
-- **Multi-Platform** - Stream to Twitch or Kick
-- **Low Resource Usage** - Optimized for dedicated streaming machines
-- **Flexible Ingest Selection** - Choose optimal ingest servers
+- **GPU Hardware Encoding** - Uses VAAPI (AMD Linux), NVENC (NVIDIA), or QuickSync (Intel) for near-zero CPU usage.
+- **Dynamic Monitor Selection** - Captured specific displays or use a test pattern for debugging.
+- **Quality Presets** - Choose between 720p30, 1080p30, and 1080p60 presets with optimized bitrates.
+- **Real-time Channel Status** - High-reliability Twitch status tracking via a robust GQL/Bun hybrid sidecar.
+- **Adaptive UI** - Dynamic window sizing that automatically fits your content.
+- **Multi-Platform** - Stream to Twitch or Kick with optimized ingest server selection.
+- **Low Resource Usage** - Optimized for dedicated streaming machines and background operation.
 
 ## Quick Start
 
-1. Download the latest release for your platform
-2. Enter your stream key (Twitch/Kick)
-3. Select your ingest server
-4. Click "Go Live"
+1. Start the application.
+2. Enter your **Stream Key**.
+3. Select your **Quality** and **Encoder**.
+4. Choose the **Monitor** you want to capture.
+5. Click **GO LIVE**.
 
 ## System Requirements
 
-- **OS**: Windows 10+, macOS 11+, Linux (Ubuntu 20.04+)
-- **GPU**: AMD (RX 500+), NVIDIA (GTX 10-series+), or Intel (Gen 9+)
-- **RAM**: 4GB minimum
-- **Network**: Stable 10+ Mbps upload
-- **FFmpeg**: Must be installed and in PATH
+- **OS**: Windows 10+, macOS 11+, Linux (CachyOS/Arch/Ubuntu).
+- **GPU**: AMD (RX 500+), NVIDIA (GTX 10-series+), or Intel (Gen 9+).
+- **RAM**: 4GB minimum.
+- **Network**: Stable upload matching your chosen quality (e.g., 6+ Mbps for 1080p60).
+- **Dependencies**: `ffmpeg`, `libva-utils` (for VAAPI), and `bun` (for status tracking).
 
-## Download
-
-[Get the latest release](https://github.com/phaylali/omnistreamstudio/releases)
-
-## Build from Source
+## Build from Source (Bun)
 
 ```bash
 # Install dependencies
 bun install
 
 # Run in development
-bun run tauri dev
+./run.sh dev
 
 # Build for release
 bun run tauri build
@@ -44,7 +43,8 @@ bun run tauri build
 
 ## Support
 
-- Report bugs via GitHub Issues
+- Report bugs via GitHub Issues.
+- For VAAPI diagnostics, run `./debug.sh vaapi`.
 
 ## License
 

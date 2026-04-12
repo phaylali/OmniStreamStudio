@@ -51,6 +51,32 @@
           </select>
         </div>
 
+        <div class="form-group">
+          <label for="quality">Quality</label>
+          <select id="quality">
+            <option value="720p30">720p 30fps</option>
+            <option value="1080p30" selected>1080p 30fps</option>
+            <option value="1080p60">1080p 60fps</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="encoder">Encoder</label>
+          <select id="encoder">
+            <option value="auto">Auto (Recommended)</option>
+            <option value="gpu">GPU (Hardware)</option>
+            <option value="igpu">Integrated GPU</option>
+            <option value="cpu">CPU (Software)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="monitor">Monitor</label>
+          <select id="monitor">
+            <option value=":0.0">Default Monitor</option>
+          </select>
+        </div>
+
         <button class="action-btn" id="action-btn">GO LIVE</button>
         <button class="action-btn stop-btn" id="stop-btn">STOP</button>
 
