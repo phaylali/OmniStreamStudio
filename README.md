@@ -7,7 +7,7 @@ A lightweight, GPU-accelerated streaming application for Twitch and Kick. Design
 - **GPU Hardware Encoding** - Uses VAAPI (AMD Linux), NVENC (NVIDIA), or QuickSync (Intel) for near-zero CPU usage.
 - **Dynamic Monitor Selection** - Captured specific displays or use a test pattern for debugging.
 - **Quality Presets** - Choose between 720p30, 1080p30, and 1080p60 presets with optimized bitrates.
-- **Real-time Channel Status** - High-reliability Twitch status tracking via a robust GQL/Bun hybrid sidecar.
+- **Real-time Channel Status** - High-reliability Twitch status tracking via a robust multi-vector Bun sidecar (GQL + Player State + Helix API).
 - **Adaptive UI** - Dynamic window sizing that automatically fits your content.
 - **Multi-Platform** - Stream to Twitch or Kick with optimized ingest server selection.
 - **Low Resource Usage** - Optimized for dedicated streaming machines and background operation.
@@ -19,6 +19,17 @@ A lightweight, GPU-accelerated streaming application for Twitch and Kick. Design
 3. Select your **Quality** and **Encoder**.
 4. Choose the **Monitor** you want to capture.
 5. Click **GO LIVE**.
+
+## Twitch API Integration (Recommended)
+
+For maximum reliability in status tracking, it is recommended to use the official Twitch Helix API. 
+1. Register an app at the [Twitch Dev Console](https://dev.twitch.tv/console).
+2. Add your **Client ID** and **Client Secret** to the `.env` file:
+   ```env
+   TWITCH_CLIENT_ID=your_id_here
+   TWITCH_CLIENT_SECRET=your_secret_here
+   ```
+3. The app will automatically prioritize the official API over the scraper for instantaneous updates.
 
 ## System Requirements
 

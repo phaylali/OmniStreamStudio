@@ -9,88 +9,173 @@
   </head>
 
   <body>
-    <div id="app">
+    <div id="app" class="studio-layout">
+      <!-- Title Bar -->
       <header class="title-bar" data-tauri-drag-region>
-        <span class="title">OmniStream Studio</span>
+        <div class="brand">
+          <span class="icon">🎬</span>
+          <span class="title">OmniStream Studio <span class="v2">V2</span></span>
+        </div>
         <div class="window-controls">
           <button class="minimize" id="minimize-btn">─</button>
           <button class="close" id="close-btn">×</button>
         </div>
       </header>
 
-      <main class="content">
-        <div class="form-group">
-          <label for="platform">Platform</label>
-          <select id="platform">
-            <option value="twitch">Twitch</option>
-            <option value="kick">Kick</option>
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label for="stream-key">Stream Key</label>
-          <div class="input-wrapper">
-            <input type="password" id="stream-key" placeholder="Enter your stream key" />
-            <button class="toggle-visibility" id="toggle-key" title="Show/Hide">👁</button>
+      <div class="studio-container">
+        <!-- Left: Chat Panel -->
+        <aside class="sidebar-left" id="chat-sidebar">
+          <div class="panel-header">
+            <span>MULTISTREAM CHAT</span>
+            <button class="panel-toggle" id="toggle-chat">«</button>
           </div>
-        </div>
+          <div class="chat-placeholder">
+            <div class="icon">💬</div>
+            <p>Chat Integration Coming Soon</p>
+          </div>
+        </aside>
 
-        <div class="form-group">
-          <label for="ingest">Ingest</label>
-          <select id="ingest">
-            <option value="">Loading...</option>
-          </select>
-        </div>
+        <!-- Center: Preview Canvas -->
+        <section class="canvas-main">
+          <div class="preview-header">
+            <div class="preview-badges">
+              <span class="badge" id="preview-status">PREVIEW OFF</span>
+              <span class="badge live-badge hidden" id="live-indicator">LIVE</span>
+            </div>
+            <div class="preview-controls">
+              <button id="toggle-preview" class="btn-icon" title="Toggle Preview (Save Resources)">👁️</button>
+              <button id="fullscreen-preview" class="btn-icon" title="Fullscreen Preview">⛶</button>
+            </div>
+          </div>
+          <div class="preview-container">
+            <canvas id="preview-canvas"></canvas>
+            <div id="preview-overlay" class="preview-overlay">
+                <div class="overlay-msg">Preview Disabled (Low Resource Mode)</div>
+            </div>
+          </div>
+          <div class="canvas-footer">
+             <div class="status-row">
+                <div class="platform-status" id="twitch-status">
+                   <span class="dot"></span> Twitch: <span class="text">Checking...</span>
+                </div>
+                <div class="platform-status" id="kick-status">
+                   <span class="dot"></span> Kick: <span class="text">Checking...</span>
+                </div>
+             </div>
+             <div class="timer" id="timer">00:00:00</div>
+          </div>
+        </section>
 
-        <div class="form-group">
-          <label for="keyint">Keyframe Interval</label>
-          <select id="keyint">
-            <option value="30">1 second</option>
-            <option value="60" selected>2 seconds</option>
-            <option value="120">4 seconds</option>
-          </select>
-        </div>
+        <!-- Right: Controls Sidebar -->
+        <aside class="sidebar-right">
+          <div class="panel-header">
+            <span>STUDIO CONTROLS</span>
+          </div>
+          
+          <div class="scroll-content">
+            <!-- Platform Toggle -->
+            <div class="section">
+              <label class="section-label">Platforms</label>
+              <div class="platforms-grid">
+                <button class="platform-btn" id="toggle-twitch" data-platform="twitch">
+                  <span class="icon">🟣</span> Twitch
+                </button>
+                <button class="platform-btn" id="toggle-kick" data-platform="kick">
+                  <span class="icon">🟢</span> Kick
+                </button>
+              </div>
+            </div>
 
-        <div class="form-group">
-          <label for="quality">Quality</label>
-          <select id="quality">
-            <option value="720p30">720p 30fps</option>
-            <option value="1080p30" selected>1080p 30fps</option>
-            <option value="1080p60">1080p 60fps</option>
-          </select>
-        </div>
+            <div id="twitch-ingest-group" class="section hidden">
+              <label class="section-label">Twitch Ingest</label>
+              <select id="ingest"></select>
+            </div>
 
-        <div class="form-group">
-          <label for="encoder">Encoder</label>
-          <select id="encoder">
-            <option value="auto">Auto (Recommended)</option>
-            <option value="gpu">GPU (Hardware)</option>
-            <option value="igpu">Integrated GPU</option>
-            <option value="cpu">CPU (Software)</option>
-          </select>
-        </div>
+            <!-- Video Section -->
+            <div class="section">
+              <label class="section-label">Video Source</label>
+              <div class="form-group">
+                 <select id="monitor"></select>
+              </div>
+              
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Quality</label>
+                  <select id="quality">
+                    <option value="720p30">720p 30</option>
+                    <option value="1080p30" selected>1080p 30</option>
+                    <option value="1080p60">1080p 60</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Encoder</label>
+                  <select id="encoder">
+                    <option value="auto">Auto</option>
+                    <option value="gpu">GPU</option>
+                    <option value="cpu">CPU</option>
+                  </select>
+                </div>
+              </div>
+            </div>
 
-        <div class="form-group">
-          <label for="monitor">Monitor</label>
-          <select id="monitor">
-            <option value=":0.0">Default Monitor</option>
-          </select>
-        </div>
+            <!-- Camera Section -->
+            <div class="section">
+              <label class="section-label">Camera Overlay</label>
+              <select id="camera-device">
+                <option value="none">Disabled</option>
+              </select>
+              <div id="camera-settings" class="hidden">
+                 <div class="form-row">
+                    <div class="form-group">
+                       <label>Position</label>
+                       <select id="camera-pos">
+                          <option value="top-left">Top Left</option>
+                          <option value="top-right">Top Right</option>
+                          <option value="bottom-left">Bottom Left</option>
+                          <option value="bottom-right" selected>Bottom Right</option>
+                       </select>
+                    </div>
+                    <div class="form-group">
+                       <label>Size</label>
+                       <select id="camera-size">
+                          <option value="0.15">Small</option>
+                          <option value="0.25" selected>Medium</option>
+                          <option value="0.35">Large</option>
+                       </select>
+                    </div>
+                 </div>
+              </div>
+            </div>
 
-        <button class="action-btn" id="action-btn">GO LIVE</button>
-        <button class="action-btn stop-btn" id="stop-btn">STOP</button>
+            <!-- Audio Section -->
+            <div class="section">
+              <label class="section-label">Audio Devices</label>
+              <div class="form-group">
+                <label>Input (Mic)</label>
+                <select id="audio-input"></select>
+                <input type="range" id="volume-input" min="0" max="150" value="100">
+              </div>
+              <div class="form-group">
+                <label>Output (System)</label>
+                <select id="audio-output"></select>
+                <input type="range" id="volume-output" min="0" max="150" value="100">
+              </div>
+            </div>
 
-        <div class="channel-status">
-          <span class="channel-indicator" id="channel-indicator"></span>
-          <span class="channel-text" id="channel-text">Checking...</span>
-        </div>
+            <div class="section">
+               <button class="action-btn" id="action-btn">GO LIVE</button>
+               <button class="stop-btn" id="stop-btn">FORCE STOP</button>
+            </div>
+          </div>
 
-        <div class="status-bar">
-          <span class="status-indicator" id="status-indicator"></span>
-          <span class="status-text" id="status-text">Ready</span>
-          <span class="timer" id="timer"></span>
-        </div>
-      </main>
+          <div class="sidebar-footer">
+             <div class="status-bar">
+                <span class="status-indicator" id="status-indicator"></span>
+                <span id="status-text">Ready</span>
+             </div>
+          </div>
+        </aside>
+      </div>
     </div>
   </body>
 </html>

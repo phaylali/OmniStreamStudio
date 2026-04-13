@@ -1,384 +1,285 @@
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
-type Platform = "twitch" | "kick";
-
-interface StreamState {
-  platform: Platform;
-  streamKey: string;
-  ingestUrl: string;
-  isLive: boolean;
-  startTime: number | null;
-}
-
-interface MonitorInfo {
-  id: string;
-  name: string;
-  resolution: string;
-  is_default: boolean;
-}
-
-// Default keys loaded from .env at build time
-declare const TWITCH_KEY: string;
-declare const KICK_KEY: string;
-declare const TWITCH_USERNAME: string;
-
-const DEFAULT_KEYS: Record<Platform, string> = {
-  twitch: typeof TWITCH_KEY !== 'undefined' ? TWITCH_KEY : "",
-  kick: typeof KICK_KEY !== 'undefined' ? KICK_KEY : ""
-};
-
-const CHANNEL_NAME = typeof TWITCH_USERNAME !== 'undefined' ? TWITCH_USERNAME : "";
-
-const TWITCH_INGESTS = [
-  { name: "Auto (Recommended)", url: "rtmps://ingest.global-contribute.live-video.net/app" },
-  { name: "Europe (Paris)", url: "rtmps://euw30.contribute.live-video.net/app" },
-  { name: "Europe (Frankfurt)", url: "rtmps://euc10.contribute.live-video.net/app" },
-  { name: "Europe (Ireland)", url: "rtmps://euw10.contribute.live-video.net/app" },
-  { name: "Europe (Stockholm)", url: "rtmps://eun10.contribute.live-video.net/app" },
-  { name: "US East (N. Virginia)", url: "rtmps://use10.contribute.live-video.net/app" },
-  { name: "US East (Ohio)", url: "rtmps://use20.contribute.live-video.net/app" },
-  { name: "US West (Oregon)", url: "rtmps://usw20.contribute.live-video.net/app" },
-];
-
-const KICK_INGESTS = [
-  { name: "Kick (Default)", url: "rtmps://live-kick.edge.kick.com/app" },
-];
-
-let state: StreamState = {
-  platform: "twitch",
-  streamKey: "",
-  ingestUrl: "",
+// --- State ---
+const state = {
   isLive: false,
-  startTime: null,
+  platforms: {
+    twitch: false,
+    kick: false
+  },
+  preview: false,
+  startTime: 0,
+  timerInterval: null as any,
+  checkInterval: null as any,
+  chatCollapsed: false
 };
 
-let availableMonitors: MonitorInfo[] = [];
-let timerInterval: number | null = null;
-
-const platformSelect = document.getElementById("platform") as HTMLSelectElement;
-const streamKeyInput = document.getElementById("stream-key") as HTMLInputElement;
-const ingestSelect = document.getElementById("ingest") as HTMLSelectElement;
+// --- DOM Elements ---
 const actionBtn = document.getElementById("action-btn") as HTMLButtonElement;
 const stopBtn = document.getElementById("stop-btn") as HTMLButtonElement;
-const toggleKeyBtn = document.getElementById("toggle-key") as HTMLButtonElement;
-const statusIndicator = document.getElementById("status-indicator") as HTMLElement;
-const statusText = document.getElementById("status-text") as HTMLElement;
-const timerEl = document.getElementById("timer") as HTMLElement;
 const minimizeBtn = document.getElementById("minimize-btn") as HTMLButtonElement;
 const closeBtn = document.getElementById("close-btn") as HTMLButtonElement;
-const channelIndicator = document.getElementById("channel-indicator") as HTMLElement;
-const channelText = document.getElementById("channel-text") as HTMLElement;
-const keyintSelect = document.getElementById("keyint") as HTMLSelectElement;
-const encoderSelect = document.getElementById("encoder") as HTMLSelectElement;
+const timerEl = document.getElementById("timer") as HTMLElement;
+const liveIndicator = document.getElementById("live-indicator") as HTMLElement;
+const statusIndicator = document.getElementById("status-indicator") as HTMLElement;
+const statusText = document.getElementById("status-text") as HTMLElement;
+
+const twitchBtn = document.getElementById("toggle-twitch") as HTMLButtonElement;
+const kickBtn = document.getElementById("toggle-kick") as HTMLButtonElement;
+const twitchIngestGroup = document.getElementById("twitch-ingest-group") as HTMLElement;
+const ingestSelect = document.getElementById("ingest") as HTMLSelectElement;
+
 const monitorSelect = document.getElementById("monitor") as HTMLSelectElement;
 const qualitySelect = document.getElementById("quality") as HTMLSelectElement;
+const encoderSelect = document.getElementById("encoder") as HTMLSelectElement;
 
-let channelCheckInterval: number | null = null;
+const camSelect = document.getElementById("camera-device") as HTMLSelectElement;
+const camSettings = document.getElementById("camera-settings") as HTMLElement;
+const camPosSelect = document.getElementById("camera-pos") as HTMLSelectElement;
+const camSizeSelect = document.getElementById("camera-size") as HTMLSelectElement;
 
-async function syncWindowSize() {
-  const win = getCurrentWindow();
-  const app = document.getElementById("app");
-  if (app) {
-    // Small delay to ensure DOM has settled
-    setTimeout(async () => {
-      const height = app.scrollHeight;
-      console.log("Setting window height to:", height);
-      await win.setSize(new LogicalSize(400, height));
-    }, 10);
-  }
+const audioInputSelect = document.getElementById("audio-input") as HTMLSelectElement;
+const audioOutputSelect = document.getElementById("audio-output") as HTMLSelectElement;
+const volumeInput = document.getElementById("volume-input") as HTMLInputElement;
+const volumeOutput = document.getElementById("volume-output") as HTMLInputElement;
+
+const toggleChatBtn = document.getElementById("toggle-chat") as HTMLButtonElement;
+const chatSidebar = document.getElementById("chat-sidebar") as HTMLElement;
+
+const togglePreviewBtn = document.getElementById("toggle-preview") as HTMLButtonElement;
+const previewCanvas = document.getElementById("preview-canvas") as HTMLCanvasElement;
+const previewOverlay = document.getElementById("preview-overlay") as HTMLElement;
+const previewStatus = document.getElementById("preview-status") as HTMLElement;
+
+// --- Init ---
+async function init() {
+  await Promise.all([
+    loadMonitors(),
+    loadAudioDevices(),
+    loadVideoDevices(),
+    loadIngests()
+  ]);
+
+  updatePlatformUI();
+  updateStatus("Ready");
+  startStatusPolling();
 }
 
-async function checkChannelStatus() {
-  if (!CHANNEL_NAME) {
-    channelText.textContent = "No channel configured";
-    return;
-  }
-
+async function loadIngests() {
   try {
-    console.log("Checking channel status for:", CHANNEL_NAME);
-    const isLive = await invoke<boolean>("check_twitch_channel", { username: CHANNEL_NAME, clientId: "" });
-    
-    if (isLive) {
-      channelIndicator.className = "channel-indicator live";
-      channelText.textContent = `${CHANNEL_NAME} is live`;
-    } else {
-      channelIndicator.className = "channel-indicator offline";
-      channelText.textContent = `${CHANNEL_NAME} is offline`;
-    }
-  } catch (error: any) {
-    console.error("Channel check error:", error);
-    channelIndicator.className = "channel-indicator error";
-    const errorMessage = error?.message || error?.toString() || "Unknown error";
-    channelText.textContent = `Error: ${errorMessage}`;
-  } finally {
-    syncWindowSize();
+    const response = await fetch("https://ingest.twitch.tv/ingests");
+    const data = await response.json();
+    ingestSelect.innerHTML = data.ingests
+      .map((i: any) => `<option value="${i.url_template.replace("{stream_key}", "")}">${i.name}</option>`)
+      .join("");
+  } catch (e) {
+    ingestSelect.innerHTML = '<option value="rtmp://live.twitch.tv/app/">Primary (Fallback)</option>';
   }
 }
 
-function startChannelCheck() {
-  if (channelCheckInterval) return;
-  checkChannelStatus();
-  channelCheckInterval = window.setInterval(checkChannelStatus, 10000);
-}
-
-function updateIngestDropdown() {
-  const ingests = state.platform === "twitch" ? TWITCH_INGESTS : KICK_INGESTS;
-  ingestSelect.innerHTML = ingests
-    .map((ingest, index) => `<option value="${ingest.url}" ${index === 0 ? "selected" : ""}>${ingest.name}</option>`)
+async function loadMonitors() {
+  const monitors = await invoke<any[]>("get_monitors");
+  monitorSelect.innerHTML = monitors
+    .map(m => `<option value="${m.id}" ${m.is_default ? 'selected' : ''}>${m.name}</option>`)
     .join("");
 }
 
-function loadDefaultKey() {
-  const defaultKey = DEFAULT_KEYS[state.platform];
-  if (defaultKey) {
-    streamKeyInput.value = defaultKey;
-    state.streamKey = defaultKey;
+async function loadAudioDevices() {
+  const devices = await invoke<any[]>("get_audio_devices");
+  const inputs = devices.filter(d => d.name.includes("(Mic)"));
+  const outputs = devices.filter(d => d.name.includes("(System)"));
+
+  audioInputSelect.innerHTML = inputs.map(d => `<option value="${d.id}">${d.name}</option>`).join("");
+  audioOutputSelect.innerHTML = outputs.map(d => `<option value="${d.id}">${d.name}</option>`).join("");
+}
+
+async function loadVideoDevices() {
+  const devices = await invoke<any[]>("get_video_devices");
+  camSelect.innerHTML = `<option value="none">Disabled</option>` + 
+    devices.map(d => `<option value="${d.id}">${d.name}</option>`).join("");
+}
+
+// --- Platform Handlers ---
+function updatePlatformUI() {
+  twitchBtn.classList.toggle("active", state.platforms.twitch);
+  kickBtn.classList.toggle("active", state.platforms.kick);
+  twitchIngestGroup.classList.toggle("hidden", !state.platforms.twitch);
+  
+  const anyActive = state.platforms.twitch || state.platforms.kick;
+  actionBtn.disabled = !anyActive;
+}
+
+twitchBtn.addEventListener("click", () => {
+  state.platforms.twitch = !state.platforms.twitch;
+  updatePlatformUI();
+});
+
+kickBtn.addEventListener("click", () => {
+  state.platforms.kick = !state.platforms.kick;
+  updatePlatformUI();
+});
+
+// --- Camera Logic ---
+camSelect.addEventListener("change", () => {
+  camSettings.classList.toggle("hidden", camSelect.value === "none");
+});
+
+// --- Chat Logic ---
+toggleChatBtn.addEventListener("click", () => {
+  state.chatCollapsed = !state.chatCollapsed;
+  chatSidebar.style.width = state.chatCollapsed ? "40px" : "var(--chat-width)";
+  toggleChatBtn.textContent = state.chatCollapsed ? "»" : "«";
+});
+
+// --- Preview Logic ---
+togglePreviewBtn.addEventListener("click", () => {
+  state.preview = !state.preview;
+  previewOverlay.classList.toggle("hidden", state.preview);
+  previewStatus.textContent = state.preview ? "PREVIEW ON" : "PREVIEW OFF";
+  if (state.preview) drawPreviewLoop();
+});
+
+function drawPreviewLoop() {
+  if (!state.preview) return;
+  const ctx = previewCanvas.getContext("2d");
+  if (!ctx) return;
+
+  // Set logical size
+  previewCanvas.width = 1280;
+  previewCanvas.height = 720;
+
+  // Draw background
+  ctx.fillStyle = "#111";
+  ctx.fillRect(0, 0, 1280, 720);
+  
+  ctx.fillStyle = "#accent";
+  ctx.font = "20px Inter";
+  ctx.fillText("Studio Preview Canvas", 540, 360);
+
+  // We will implement actual capture frame injection in V2.1
+  // For now, this validates the layout
+  
+  if (state.preview) requestAnimationFrame(drawPreviewLoop);
+}
+
+// --- Stream Control ---
+async function startStream() {
+  if (state.isLive) return;
+
+  const configs = [];
+  if (state.platforms.twitch) {
+    configs.push({
+      platform: "twitch",
+      url: `${ingestSelect.value}${import.meta.env.VITE_TWITCH_KEY}`
+    });
+  }
+  if (state.platforms.kick) {
+    configs.push({
+      platform: "kick",
+      url: `${import.meta.env.VITE_KICK_URL}${import.meta.env.VITE_KICK_KEY}`
+    });
+  }
+
+  updateStatus("Starting...");
+  try {
+    const res = await invoke("start_stream", {
+      configs,
+      keyint: 60,
+      encoderType: encoderSelect.value,
+      monitorId: monitorSelect.value,
+      resolution: monitorSelect.options[monitorSelect.selectedIndex].text.match(/\((.*?)\)/)?.[1] || "1920x1080",
+      quality: qualitySelect.value,
+      audioInput: audioInputSelect.value,
+      audioOutput: audioOutputSelect.value,
+      cameraDevice: camSelect.value,
+      cameraPos: camPosSelect.value,
+      cameraSize: parseFloat(camSizeSelect.value),
+      volumeInput: parseFloat(volumeInput.value),
+      volumeOutput: parseFloat(volumeOutput.value)
+    });
+
+    state.isLive = true;
+    state.startTime = Date.now();
+    startTimer();
+    updateUI();
+    updateStatus("Live");
+    console.log(res);
+  } catch (e) {
+    updateStatus("Error: " + e, true);
   }
 }
 
-function updateStatus(text: string, statusClass: "live" | "error" | "" = "") {
+async function stopStream() {
+  await invoke("stop_stream");
+  state.isLive = false;
+  stopTimer();
+  updateUI();
+  updateStatus("Ready");
+}
+
+actionBtn.addEventListener("click", () => {
+  if (state.isLive) stopStream();
+  else startStream();
+});
+
+stopBtn.addEventListener("click", async () => {
+  await invoke("stop_stream"); // Added to lib.rs
+  location.reload();
+});
+
+// --- UI Helpers ---
+function updateUI() {
+  actionBtn.textContent = state.isLive ? "STOP STREAM" : "GO LIVE";
+  actionBtn.classList.toggle("stop-btn", state.isLive);
+  liveIndicator.classList.toggle("hidden", !state.isLive);
+}
+
+function updateStatus(text: string, isError = false) {
   statusText.textContent = text;
-  statusIndicator.className = "status-indicator" + (statusClass ? ` ${statusClass}` : "");
-  syncWindowSize();
+  statusIndicator.className = "status-indicator " + (state.isLive ? "live" : isError ? "error" : "");
 }
 
 function startTimer() {
-  if (timerInterval) return;
-  state.startTime = Date.now();
-  timerInterval = window.setInterval(() => {
-    if (!state.startTime) return;
-    const elapsed = Math.floor((Date.now() - state.startTime) / 1000);
-    const hours = Math.floor(elapsed / 3600).toString().padStart(2, "0");
-    const minutes = Math.floor((elapsed % 3600) / 60).toString().padStart(2, "0");
-    const seconds = (elapsed % 60).toString().padStart(2, "0");
-    timerEl.textContent = `${hours}:${minutes}:${seconds}`;
+  state.timerInterval = setInterval(() => {
+    const diff = Math.floor((Date.now() - state.startTime) / 1000);
+    const h = Math.floor(diff / 3600).toString().padStart(2, "0");
+    const m = Math.floor((diff % 3600) / 60).toString().padStart(2, "0");
+    const s = Math.floor(diff % 60).toString().padStart(2, "0");
+    timerEl.textContent = `${h}:${m}:${s}`;
   }, 1000);
 }
 
 function stopTimer() {
-  if (timerInterval) {
-    clearInterval(timerInterval);
-    timerInterval = null;
-  }
-  timerEl.textContent = "";
-  state.startTime = null;
+  clearInterval(state.timerInterval);
+  timerEl.textContent = "00:00:00";
 }
 
-async function startStream(silent = false) {
-  const streamKey = streamKeyInput.value.trim();
-  if (!streamKey) {
-    updateStatus("Stream key required", "error");
-    return;
-  }
-
-  const ingestUrl = ingestSelect.value;
-  const fullUrl = `${ingestUrl}/${streamKey}`;
-
-  if (!silent) {
-    actionBtn.disabled = true;
-    actionBtn.textContent = "Starting...";
-    updateStatus("Starting stream... Check console for details.");
-  }
-
-  try {
-    const keyint = keyintSelect.value;
-    const encoder = encoderSelect.value;
-    const monitorId = monitorSelect.value;
-    const quality = qualitySelect.value;
-    const monitor = availableMonitors.find(m => m.id === monitorId);
-    const resolution = monitor ? monitor.resolution : "1920x1080";
-
-    const result = await invoke<string>("start_stream", {
-      platform: state.platform,
-      url: fullUrl,
-      keyint: parseInt(keyint, 10),
-      encoderType: encoder,
-      monitorId: monitorId,
-      resolution: resolution,
-      quality: quality,
-    });
-    console.log("Start result:", result);
-    
-    state.isLive = true;
-    actionBtn.textContent = "END STREAM";
-    actionBtn.classList.add("live");
-    actionBtn.disabled = false;
-    updateStatus("Live", "live");
-    if (!silent) startTimer();
-  } catch (error: any) {
-    console.error("Stream error:", error);
-    const errorMsg = error?.toString() || "Unknown error";
-    updateStatus(`Error: ${errorMsg}`, "error");
-    actionBtn.textContent = "GO LIVE";
-    actionBtn.disabled = false;
-  }
-}
-
-async function stopStream(silent = false) {
-  if (!silent) {
-    actionBtn.disabled = true;
-    actionBtn.textContent = "Stopping...";
-    updateStatus("Stopping stream...");
-  }
-
-  try {
-    await invoke("stop_stream");
-    state.isLive = false;
-    if (!silent) {
-      stopTimer();
-      actionBtn.textContent = "GO LIVE";
-      actionBtn.classList.remove("live");
-      actionBtn.disabled = false;
-      updateStatus("Ready");
+function startStatusPolling() {
+  state.checkInterval = setInterval(async () => {
+    if (state.platforms.twitch) {
+        checkStatus("twitch", import.meta.env.VITE_TWITCH_USERNAME);
     }
-  } catch (error) {
-    console.error("Stop error:", error);
-    if (!silent) {
-      updateStatus(`Error: ${error}`, "error");
-      actionBtn.disabled = false;
+    if (state.platforms.kick) {
+        checkStatus("kick", import.meta.env.VITE_KICK_USERNAME);
     }
+  }, 20000);
+}
+
+async function checkStatus(platform: string, user: string) {
+  const isLive = await invoke<boolean>("check_twitch_channel", { username: user });
+  const el = document.getElementById(`${platform}-status`);
+  if (el) {
+    el.classList.toggle("live", isLive);
+    el.querySelector(".text")!.textContent = isLive ? "LIVE" : "OFFLINE";
   }
 }
 
-async function forceStopStream() {
-  stopBtn.disabled = true;
-  stopBtn.textContent = "Killing...";
-  updateStatus("Force stopping...");
-
-  try {
-    await invoke("force_stop_stream");
-  } catch (error) {
-    console.error("Force stop error:", error);
-  }
-  
-  state.isLive = false;
-  stopTimer();
-  actionBtn.textContent = "GO LIVE";
-  actionBtn.classList.remove("live");
-  actionBtn.disabled = false;
-  stopBtn.disabled = false;
-  stopBtn.textContent = "STOP";
-  updateStatus("Ready");
-}
-
-platformSelect.addEventListener("change", () => {
-  state.platform = platformSelect.value as Platform;
-  updateIngestDropdown();
-});
-
-actionBtn.addEventListener("click", () => {
-  if (state.isLive) {
-    stopStream();
-  } else {
-    startStream();
-  }
-});
-
-stopBtn.addEventListener("click", () => {
-  forceStopStream();
-});
-
-monitorSelect.addEventListener("change", async () => {
-  if (state.isLive) {
-    console.log("Monitor changed while live. Restarting stream for seamless switch...");
-    // Keep current startTime to not reset timer
-    const currentStartTime = state.startTime;
-    await stopStream(true); // silent stop
-    await startStream(true); // silent start
-    state.startTime = currentStartTime; 
-  }
-});
-
-qualitySelect.addEventListener("change", async () => {
-  if (state.isLive) {
-    console.log("Quality changed while live. Restarting stream...");
-    const currentStartTime = state.startTime;
-    await stopStream(true);
-    await startStream(true);
-    state.startTime = currentStartTime;
-  }
-});
-
-toggleKeyBtn.addEventListener("click", () => {
-  streamKeyInput.type = streamKeyInput.type === "password" ? "text" : "password";
-});
-
-minimizeBtn.addEventListener("click", async () => {
-  const win = getCurrentWindow();
-  await win.minimize();
-});
-
+// --- Window Controls ---
+minimizeBtn.addEventListener("click", () => getCurrentWindow().minimize());
 closeBtn.addEventListener("click", async () => {
-  if (state.isLive) {
-    await stopStream();
-  }
-  const win = getCurrentWindow();
-  await win.close();
+  if (state.isLive) await stopStream();
+  getCurrentWindow().close();
 });
 
-updateIngestDropdown();
-loadDefaultKey();
-startChannelCheck();
-updateStatus("Ready");
-
-async function initEncoders() {
-  try {
-    const encoders = await invoke<any[]>("get_available_encoders");
-
-    encoderSelect.innerHTML = `<option value="auto">Auto (Recommended)</option>`;
-
-    // Group encoders by type
-    const gpuEncoders = encoders.filter(e => e.type_ === "gpu");
-    const igpuEncoders = encoders.filter(e => e.type_ === "igpu");
-    const cpuEncoders = encoders.filter(e => e.type_ === "cpu");
-
-    gpuEncoders.forEach(encoder => {
-      encoderSelect.innerHTML += `<option value="gpu">${encoder.name}</option>`;
-    });
-
-    igpuEncoders.forEach(encoder => {
-      encoderSelect.innerHTML += `<option value="igpu">${encoder.name}</option>`;
-    });
-
-    cpuEncoders.forEach(encoder => {
-      encoderSelect.innerHTML += `<option value="cpu">${encoder.name}</option>`;
-    });
-
-    if (gpuEncoders.length === 0) {
-      encoderSelect.innerHTML += `<option value="gpu">GPU (Hardware)</option>`;
-    }
-    if (igpuEncoders.length === 0) {
-      encoderSelect.innerHTML += `<option value="igpu">Integrated GPU</option>`;
-    }
-    if (cpuEncoders.length === 0) {
-      encoderSelect.innerHTML += `<option value="cpu">CPU (Software)</option>`;
-    }
-  } catch (error) {
-    console.error("Failed to load encoders:", error);
-    encoderSelect.innerHTML = `
-      <option value="auto">Auto (Recommended)</option>
-      <option value="gpu">GPU (Hardware)</option>
-      <option value="igpu">Integrated GPU</option>
-      <option value="cpu">CPU (Software)</option>
-    `;
-  } finally {
-    syncWindowSize();
-  }
-}
-
-async function initMonitors() {
-  try {
-    availableMonitors = await invoke<MonitorInfo[]>("get_monitors");
-    monitorSelect.innerHTML = availableMonitors
-      .map(m => `<option value="${m.id}" ${m.is_default ? "selected" : ""}>${m.name}</option>`)
-      .join("");
-  } catch (error) {
-    console.error("Failed to load monitors:", error);
-  } finally {
-    syncWindowSize();
-  }
-}
-
-initEncoders();
-initMonitors();
+init();

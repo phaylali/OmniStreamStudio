@@ -14,10 +14,10 @@
     "windows": [
       {
         "title": "OmniStream Studio",
-        "width": 400,
-        "height": 500,
-        "minWidth": 400,
-        "minHeight": 200,
+        "width": 1200,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 500,
         "resizable": true,
         "center": true,
         "decorations": false,
@@ -25,7 +25,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' https://ingest.twitch.tv; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self' 'unsafe-inline' data: blob:; connect-src 'self' https://* rtmps://* ws://*; img-src 'self' data: https://*; style-src 'self' 'unsafe-inline'"
     }
   },
   "bundle": {

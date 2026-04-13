@@ -69,12 +69,22 @@ Capture is handled via `x11grab` with precise geometry tracking per monitor:
 - **Input**: `:0.0+X,Y` where X and Y are offsets detected from `xrandr --listmonitors`.
 - **Scaling**: Handled by FFmpeg filters to match the selected Quality preset.
 
-## Twitch Status Tracking (Tiered System)
+## Twitch Status Tracking (Hybrid System)
 
-Twitch's API/GQL is heavily protected. The app uses a tiered logic:
+Twitch's API/GQL is heavily protected. The app uses a tiered logic for maximum reliability:
 
-1. **Rust GQL**: Mimics a browser request to `gql.twitch.tv/gql` with a unique `Client-ID` and `X-Device-Id`.
-2. **Bun Scraper Fallback**: Runs `scripts/status.ts` using Bun. It fetches the channel page and searches for the `"isLive":true` / `"type":"live"` markers in the initial state JSON, bypassing GQL rejects.
+1. **Option A: Official Helix API (Recommended)** 
+   - Enabled by providing `TWITCH_CLIENT_SECRET` in `.env`.
+   - Uses `oauth2/token` (Client Credentials flow) to get a 60-day App Access Token.
+   - Queries `helix/streams` directly. No scraping, 100% accurate.
+
+2. **Option B: Multi-Vector Scraper (Fallback)**
+   - Used when credentials are missing.
+   - **Vector 1: Dynamic State**: Matches player-state fragments like `"broadcast_type":"live"`.
+   - **Vector 2: Stream Presence**: Checks for active stream objects in the GQL-ready initial state.
+   - **Vector 3: Metadata Ingestion**: Scans for thumbnail patterns (`live_user_...`) in script strings.
+   - **Safety**: Strictly excludes cases with `"stream":null` or missing "Streaming" labels in the metadata to prevent stale-session false positives.
+   - Managed by Bun to avoid `reqwest` bot-protection blocks and ensure high performance.
 
 ## Build & Debug
 

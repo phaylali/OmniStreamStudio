@@ -26,9 +26,11 @@ export default defineConfig(async () => ({
     },
   },
   define: {
-    'TWITCH_KEY': JSON.stringify(process.env.TWITCH_KEY || ''),
-    'KICK_KEY': JSON.stringify(process.env.KICK_KEY || ''),
-    'TWITCH_USERNAME': JSON.stringify(process.env.TWITCH_USERNAME || ''),
-    'TWITCH_CLIENT_ID': JSON.stringify(process.env.TWITCH_CLIENT_ID || ''),
+    'import.meta.env.VITE_TWITCH_KEY': JSON.stringify(process.env.TWITCH_KEY || ''),
+    'import.meta.env.VITE_KICK_KEY': JSON.stringify(process.env.KICK_KEY || ''),
+    'import.meta.env.VITE_KICK_URL': JSON.stringify(process.env.KICK_STREAM_URL || ''),
+    'import.meta.env.VITE_TWITCH_USERNAME': JSON.stringify(process.env.TWITCH_USERNAME || ''),
+    'import.meta.env.VITE_KICK_USERNAME': JSON.stringify(process.env.KICK_USERNAME || ''),
+    'import.meta.env.VITE_TWITCH_CLIENT_ID': JSON.stringify(process.env.TWITCH_CLIENT_ID || ''),
   },
 }));
