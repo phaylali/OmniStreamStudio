@@ -1,5 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
+
+const appWindow = getCurrentWindow();
 
 // --- State ---
 const state = {
@@ -51,19 +54,83 @@ const togglePreviewBtn = document.getElementById("toggle-preview") as HTMLButton
 const previewCanvas = document.getElementById("preview-canvas") as HTMLCanvasElement;
 const previewOverlay = document.getElementById("preview-overlay") as HTMLElement;
 const previewStatus = document.getElementById("preview-status") as HTMLElement;
+const fullscreenPreviewBtn = document.getElementById("fullscreen-preview") as HTMLButtonElement;
+
+const titleBar = document.querySelector(".title-bar") as HTMLElement;
+
+// --- Window Controls & Dragging ---
+function setupWindowControls() {
+  if (titleBar) {
+    titleBar.addEventListener("mousedown", async (e: MouseEvent) => {
+      if ((e.target as HTMLElement).closest(".window-controls")) return;
+      await appWindow.startDragging();
+    });
+  }
+
+  if (minimizeBtn) minimizeBtn.addEventListener("click", () => appWindow.minimize());
+  if (closeBtn) closeBtn.addEventListener("click", () => {
+     if (state.isLive) invoke("stop_stream");
+     appWindow.close();
+  });
+
+  // Fullscreen Preview logic (Browser API for canvas)
+  if (fullscreenPreviewBtn) {
+    fullscreenPreviewBtn.addEventListener("click", () => {
+      if (!document.fullscreenElement) {
+        previewCanvas.requestFullscreen().catch(err => {
+          console.error(`Error attempting to enable full-screen mode: ${err.message}`);
+        });
+      } else {
+        document.exitFullscreen();
+      }
+    });
+  }
+
+  // Escape key to exit fullscreen
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && document.fullscreenElement) {
+      document.exitFullscreen();
+    }
+  });
+}
 
 // --- Init ---
 async function init() {
-  await Promise.all([
-    loadMonitors(),
-    loadAudioDevices(),
-    loadVideoDevices(),
-    loadIngests()
-  ]);
+  console.log("OmniStream Studio V2 initializing...");
+  setupWindowControls();
+
+  try {
+    await Promise.all([
+      loadMonitors(),
+      loadAudioDevices(),
+      loadVideoDevices(),
+      loadIngests()
+    ]);
+  } catch (err) {
+    console.error("Critical device load error:", err);
+  }
 
   updatePlatformUI();
   updateStatus("Ready");
   startStatusPolling();
+
+  try {
+    await listen<string>("preview-frame", (event) => {
+      if (!state.preview) return;
+      const img = new Image();
+      img.onload = () => {
+        const ctx = previewCanvas.getContext("2d");
+        if (ctx) {
+          previewCanvas.width = img.width;
+          previewCanvas.height = img.height;
+          ctx.drawImage(img, 0, 0);
+        }
+      };
+      img.src = `data:image/jpeg;base64,${event.payload}`;
+    });
+  } catch (err) {
+    console.warn("Tauri event listen error:", err);
+  }
 }
 
 async function loadIngests() {
@@ -120,9 +187,16 @@ kickBtn.addEventListener("click", () => {
   updatePlatformUI();
 });
 
-// --- Camera Logic ---
+// --- Camera & Monitor Selectors ---
 camSelect.addEventListener("change", () => {
   camSettings.classList.toggle("hidden", camSelect.value === "none");
+});
+
+monitorSelect.addEventListener("change", async () => {
+  if (state.preview) {
+    await invoke("stop_preview");
+    await startPreview();
+  }
 });
 
 // --- Chat Logic ---
@@ -132,38 +206,29 @@ toggleChatBtn.addEventListener("click", () => {
   toggleChatBtn.textContent = state.chatCollapsed ? "»" : "«";
 });
 
-// --- Preview Logic ---
-togglePreviewBtn.addEventListener("click", () => {
+// --- Preview Control ---
+togglePreviewBtn.addEventListener("click", async () => {
   state.preview = !state.preview;
   previewOverlay.classList.toggle("hidden", state.preview);
   previewStatus.textContent = state.preview ? "PREVIEW ON" : "PREVIEW OFF";
-  if (state.preview) drawPreviewLoop();
+  
+  if (state.preview) {
+    await startPreview();
+  } else {
+    await invoke("stop_preview");
+  }
 });
 
-function drawPreviewLoop() {
-  if (!state.preview) return;
-  const ctx = previewCanvas.getContext("2d");
-  if (!ctx) return;
-
-  // Set logical size
-  previewCanvas.width = 1280;
-  previewCanvas.height = 720;
-
-  // Draw background
-  ctx.fillStyle = "#111";
-  ctx.fillRect(0, 0, 1280, 720);
+async function startPreview() {
+  const monId = monitorSelect.value;
+  const monitors = await invoke<any[]>("get_monitors");
+  const selectedMon = monitors.find(m => m.id === monId);
+  const res = selectedMon ? selectedMon.resolution : "1280x720";
   
-  ctx.fillStyle = "#accent";
-  ctx.font = "20px Inter";
-  ctx.fillText("Studio Preview Canvas", 540, 360);
-
-  // We will implement actual capture frame injection in V2.1
-  // For now, this validates the layout
-  
-  if (state.preview) requestAnimationFrame(drawPreviewLoop);
+  await invoke("start_preview", { monitorId: monId, resolution: res });
 }
 
-// --- Stream Control ---
+// --- Streaming Control ---
 async function startStream() {
   if (state.isLive) return;
 
@@ -183,15 +248,19 @@ async function startStream() {
 
   updateStatus("Starting...");
   try {
-    const res = await invoke("start_stream", {
+    const monitors = await invoke<any[]>("get_monitors");
+    const selectedMon = monitors.find(m => m.id === monitorSelect.value);
+    const res = selectedMon ? selectedMon.resolution : "1280x720";
+
+    const result = await invoke("start_stream", {
       configs,
       keyint: 60,
       encoderType: encoderSelect.value,
       monitorId: monitorSelect.value,
-      resolution: monitorSelect.options[monitorSelect.selectedIndex].text.match(/\((.*?)\)/)?.[1] || "1920x1080",
+      resolution: res,
       quality: qualitySelect.value,
-      audioInput: audioInputSelect.value,
-      audioOutput: audioOutputSelect.value,
+      audioInput: audioInputSelect.value || "auto",
+      audioOutput: audioOutputSelect.value || "auto",
       cameraDevice: camSelect.value,
       cameraPos: camPosSelect.value,
       cameraSize: parseFloat(camSizeSelect.value),
@@ -224,7 +293,7 @@ actionBtn.addEventListener("click", () => {
 });
 
 stopBtn.addEventListener("click", async () => {
-  await invoke("stop_stream"); // Added to lib.rs
+  await invoke("stop_stream");
   location.reload();
 });
 
@@ -257,29 +326,22 @@ function stopTimer() {
 
 function startStatusPolling() {
   state.checkInterval = setInterval(async () => {
-    if (state.platforms.twitch) {
-        checkStatus("twitch", import.meta.env.VITE_TWITCH_USERNAME);
-    }
-    if (state.platforms.kick) {
-        checkStatus("kick", import.meta.env.VITE_KICK_USERNAME);
-    }
+    const twitchUser = import.meta.env.VITE_TWITCH_USERNAME;
+    const kickUser = import.meta.env.VITE_KICK_USERNAME;
+    if (state.platforms.twitch && twitchUser) checkStatus("twitch", twitchUser);
+    if (state.platforms.kick && kickUser) checkStatus("kick", kickUser);
   }, 20000);
 }
 
 async function checkStatus(platform: string, user: string) {
-  const isLive = await invoke<boolean>("check_twitch_channel", { username: user });
-  const el = document.getElementById(`${platform}-status`);
-  if (el) {
-    el.classList.toggle("live", isLive);
-    el.querySelector(".text")!.textContent = isLive ? "LIVE" : "OFFLINE";
-  }
+  try {
+    const isLive = await invoke<boolean>("check_twitch_channel", { username: user });
+    const el = document.getElementById(`${platform}-status`);
+    if (el) {
+      el.classList.toggle("live", isLive);
+      el.querySelector(".text")!.textContent = isLive ? "LIVE" : "OFFLINE";
+    }
+  } catch (e) {}
 }
-
-// --- Window Controls ---
-minimizeBtn.addEventListener("click", () => getCurrentWindow().minimize());
-closeBtn.addEventListener("click", async () => {
-  if (state.isLive) await stopStream();
-  getCurrentWindow().close();
-});
 
 init();

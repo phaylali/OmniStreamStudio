@@ -1,10 +1,10 @@
-use log::info;
+use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use std::process::Stdio;
 use std::sync::Mutex;
-use tauri::{State};
+use tauri::{State, Emitter};
 use tokio::process::Command;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, BufReader, AsyncReadExt};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -155,11 +155,24 @@ async fn start_stream(
     // 0: Placeholder background
     cmd.arg("-loop").arg("1").arg("-i").arg(placeholder);
 
-    // 1: Monitor Capture
-    cmd.arg("-f").arg("x11grab")
-       .arg("-framerate").arg(framerate.to_string())
-       .arg("-video_size").arg(resolution)
-       .arg("-i").arg(monitor_id);
+    let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".to_string());
+    let base_display = if display.contains('.') { display } else { format!("{}.0", display) };
+    let input_id = if monitor_id == "none" { 
+        "none".to_string() 
+    } else {
+        format!("{}{}", base_display, monitor_id.replace(":0.0", ""))
+    };
+
+    // 1: Monitor Capture or Test Pattern
+    if input_id == "none" {
+        cmd.arg("-f").arg("lavfi")
+           .arg("-i").arg(format!("testsrc=size={}:rate={}", resolution, framerate));
+    } else {
+        cmd.arg("-f").arg("x11grab")
+           .arg("-framerate").arg(framerate.to_string())
+           .arg("-video_size").arg(resolution)
+           .arg("-i").arg(input_id);
+    }
 
     // 2: Camera (if enabled)
     let has_camera = camera_device != "none";
@@ -256,6 +269,111 @@ async fn stop_stream(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+async fn start_preview(
+    monitor_id: String,
+    resolution: String,
+    window: tauri::Window,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mut stream_state = state.stream.lock().map_err(|e| e.to_string())?;
+    if stream_state.preview_child.is_some() {
+        return Ok(());
+    }
+
+    info!("Starting preview for {}", monitor_id);
+
+    let input_id = monitor_id;
+    info!("Starting preview for Input: {}", input_id);
+
+    let mut cmd = Command::new("ffmpeg");
+    if input_id == "none" {
+        cmd.args([
+            "-f", "lavfi",
+            "-i", &format!("testsrc=size={}:rate=15", resolution),
+            "-c:v", "mjpeg",
+            "-f", "image2pipe",
+            "pipe:1"
+        ]);
+    } else {
+        cmd.args([
+            "-f", "x11grab",
+            "-framerate", "15",
+            "-video_size", &resolution,
+            "-i", &input_id,
+            "-vf", "scale=640:-1",
+            "-c:v", "mjpeg",
+            "-f", "image2pipe",
+            "pipe:1"
+        ]);
+    }
+
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+
+    let mut child = cmd.spawn().map_err(|e| e.to_string())?;
+    let stdout = child.stdout.take().ok_or("Failed to open preview pipe")?;
+    let stderr = child.stderr.take().ok_or("Failed to open preview stderr")?;
+
+    // Log preview stderr
+    tokio::spawn(async move {
+        let mut reader = BufReader::new(stderr).lines();
+        while let Ok(Some(line)) = reader.next_line().await {
+            warn!("Preview FFmpeg: {}", line);
+        }
+    });
+
+    tokio::spawn(async move {
+        let mut reader = BufReader::with_capacity(262144, stdout);
+        let mut buffer = Vec::new();
+        let mut in_frame = false;
+        
+        let mut chunk = [0u8; 16384];
+        while let Ok(n) = reader.read(&mut chunk).await {
+            if n == 0 { break; }
+            for i in 0..n {
+                let b = chunk[i];
+                if !in_frame {
+                    if b == 0xFF {
+                        buffer.push(b);
+                    } else if !buffer.is_empty() && buffer[buffer.len()-1] == 0xFF && b == 0xD8 {
+                        buffer.push(b);
+                        in_frame = true;
+                    } else {
+                        buffer.clear();
+                    }
+                    continue;
+                }
+
+                buffer.push(b);
+
+                if buffer.len() > 2 && buffer[buffer.len()-2] == 0xFF && b == 0xD9 {
+                    let base64 = data_encoding::BASE64.encode(&buffer);
+                    let _ = window.emit("preview-frame", base64);
+                    buffer.clear();
+                    in_frame = false;
+                }
+                if buffer.len() > 5000000 { buffer.clear(); in_frame = false; }
+            }
+        }
+    });
+
+    stream_state.preview_child = Some(child);
+    Ok(())
+}
+
+#[tauri::command]
+async fn stop_preview(state: State<'_, AppState>) -> Result<(), String> {
+    let child = {
+        let mut stream_state = state.stream.lock().map_err(|e| e.to_string())?;
+        stream_state.preview_child.take()
+    };
+    
+    if let Some(mut c) = child {
+        let _ = c.kill().await;
+    }
+    Ok(())
+}
+
 fn get_encoder_config(id: &str) -> (String, Vec<&'static str>, String) {
     match id {
         "gpu" => ("h264_vaapi".to_string(), vec!["-rc_mode", "CBR", "-qp", "23"], "VAAPI".to_string()),
@@ -267,6 +385,18 @@ fn get_encoder_config(id: &str) -> (String, Vec<&'static str>, String) {
 #[tauri::command]
 fn get_monitors() -> Vec<MonitorInfo> {
     let mut monitors = Vec::new();
+
+    let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".to_string());
+    // Ensure display has .0 for x11grab compatibility
+    let base_display = if display.contains('.') { display } else { format!("{}.0", display) };
+
+    monitors.push(MonitorInfo {
+        id: "none".to_string(),
+        name: "No Monitor (Test Pattern)".to_string(),
+        resolution: "1280x720".to_string(),
+        is_default: false,
+    });
+
     #[cfg(target_os = "linux")]
     {
         if let Ok(output) = std::process::Command::new("xrandr").arg("--listmonitors").output() {
@@ -279,7 +409,7 @@ fn get_monitors() -> Vec<MonitorInfo> {
                         let monitor_name = parts.last().unwrap_or(&"Unknown").to_string();
                         if let Some(geom) = parts.iter().find(|p| p.contains('x') && p.contains('+')) {
                              monitors.push(MonitorInfo {
-                                 id: format!(":0.0+{}", geom.split('+').nth(1).unwrap_or("0")),
+                                 id: format!("{}+{}", base_display, geom.split('+').nth(1).unwrap_or("0")),
                                  name: format!("Monitor {} ({})", monitor_name, geom.split('+').next().unwrap_or("")),
                                  resolution: geom.split('+').next().unwrap_or("1920x1080").to_string(),
                                  is_default: is_primary,
@@ -325,6 +455,8 @@ pub fn run() {
             get_monitors,
             start_stream,
             stop_stream,
+            start_preview,
+            stop_preview,
             check_twitch_channel
         ])
         .run(tauri::generate_context!())
