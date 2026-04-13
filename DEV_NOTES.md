@@ -2,103 +2,100 @@
 
 ## Project Overview
 
-A lightweight GPU-accelerated streaming encoder designed for minimal resource consumption. Targets users who want dedicated streaming without the overhead of full broadcast software.
+Professional GPU-accelerated streaming encoder with multi-layer compositing for Twitch and Kick.
 
 ## Architecture
 
 ### Tech Stack
 
-- **Framework**: Tauri 2.x (Rust backend + WebView2 frontend)
-- **UI**: Vanilla TypeScript + CSS (no heavy frameworks)
-- **Encoder**: FFmpeg with hardware acceleration
-- **Status Sidecar**: Bun-based scraper for high-reliability Twitch status tracking
-- **Streaming**: RTMP protocol via FFmpeg
+- **Framework**: Tauri 2.x (Rust backend + WebView2)
+- **UI**: Vanilla TypeScript + CSS
+- **Encoder**: FFmpeg (VAAPI/NVENC/QSV/x264)
+- **Streaming**: RTMP via FFmpeg tee muxer
 
-### Core Design Principles
+### Core Components
 
-1. **GPU-First Encoding** - CPU fallback only when GPU unavailable
-2. **Zero-Bloat** - No scene compositing, no filters, no plugins
-3. **Robust Tracking** - Multi-layer status check (Rust GQL + Bun Scraper fallback)
-4. **Adaptive UI** - Content-driven window sizing
+1. **Frontend (`main.ts`)** - UI, layer management, Tauri IPC
+2. **Backend (`lib.rs`)** - FFmpeg process, device enumeration, stats
+3. **Status Script (`status.ts`)** - Bun-based channel status checker
 
-## UI/UX Specification
+## Layer System
 
-### Window Configuration
+| Type | Capture Method | Features |
+|------|---------------|----------|
+| Monitor | x11grab | Geometry detection, X/Y offset |
+| Camera | video4linux2 | V4L2 devices |
+| Image | file input | Looping, scale |
+| Video | file input | Loop, volume control |
+| Mic | pulseaudio | Device selection + volume |
+| Music | file input | Auto-loop, volume |
+| Placeholder | lavfi color | Color block |
 
-- **Size**: Dynamic height (400px width), resizable programmatically to fit content
-- **Position**: Center on primary monitor
-- **Style**: Frameless with custom title bar
-- **Theme**: Dark mode only (#1a1a1a background)
+## Video Pipeline
 
-### Components
+### Filter Graph Construction
 
-| Component | Features |
-|-----------|----------|
-| Platform dropdown | Twitch/Kick switcher |
-| Quality dropdown | 720p30, 1080p30, 1080p60 presets |
-| Monitor selector | Dynamic `xrandr` detection with resolution/offset support |
-| Encoder selector | Priority-based hardware detection (VAAPI, NVENC, QSV, SW) |
-| Live Indicator | Multi-source real-time status tracker |
+```
+lavfi color=black (background)
+    ↓ overlay ↓
+x11grab (monitor) → scale → overlay → ...
+    ↓
+video4linux2 (camera) → scale → overlay → ...
+    ↓
+[inputs] → amix (audio mixing)
+    ↓
+VAAPI hwupload (if GPU encoding)
+    ↓
+FFmpeg encoding → RTMP output
+```
 
-## Video Encoding
+### Quality Presets
 
-### Quality Presets & Bitrates
-
-| Preset | Target Res | FPS | Bitrate (CBR) |
-|--------|------------|-----|---------------|
+| Preset | Resolution | FPS | Bitrate |
+|--------|-----------|-----|--------|
 | 720p30 | 1280x720 | 30 | 3000k |
-| 1080p30| 1920x1080 | 30 | 4500k |
-| 1080p60| 1920x1080 | 60 | 6000k |
+| 1080p30 | 1920x1080 | 30 | 4500k |
+| 1080p60 | 1920x1080 | 60 | 6000k |
 
-### Encoder Priority (Linux — CachyOS / Arch)
+### Encoder Priority
 
-1. **VAAPI** (`h264_vaapi`) — Primary for AMD/Intel on Linux. Uses `/dev/dri/renderD128`.
-2. **NVIDIA NVENC** (`h264_nvenc`) — For NVIDIA GPUs.
-3. **Software** (`libx264`) — CPU fallback with `ultrafast` preset.
+1. **VAAPI** (`h264_vaapi`) - AMD/Intel GPUs
+2. **NVENC** (`h264_nvenc`) - NVIDIA GPUs
+3. **Software** (`libx264`) - CPU fallback
 
-### Filter Chain Construction
+## Preview Pipeline
 
-The filter chain is constructed dynamically based on the source resolution (detected via `xrandr`) and the target quality.
+- FFmpeg output via `image2pipe` (MJPEG)
+- Raw stdout captured in Rust
+- JPEG frames extracted and base64 encoded
+- Emitted via Tauri events to frontend Canvas
 
-- **VAAPI Path**: `scale=WIDTH:HEIGHT:flags=fast_bilinear,format=nv12,hwupload`
-- **Software Path**: `scale=WIDTH:HEIGHT:flags=fast_bilinear`
+## System Stats
 
-## Capture Pipeline (Linux)
+- **CPU**: `ps` command on app/ffmpeg PIDs
+- **GPU**: `/sys/class/drm/card*/device/hwmon/*/gpu_busy_percent`
+- **VRAM**: `/sys/class/drm/card*/device/mem_info_vram_used`
 
-Capture is handled via `x11grab` with precise geometry tracking per monitor:
-- **Input**: `:0.0+X,Y` where X and Y are offsets detected from `xrandr --listmonitors`.
-- **Scaling**: Handled by FFmpeg filters to match the selected Quality preset.
+## Known Limitations
 
-## Twitch Status Tracking (Hybrid System)
+1. **Kick Streaming**: Dual platform muxing may have issues
+2. **Monitor Geometry**: Offset monitors require precise xrandr parsing
+3. **Wayland**: PipeWire capture not yet implemented
 
-Twitch's API/GQL is heavily protected. The app uses a tiered logic for maximum reliability:
+## Commands
 
-1. **Option A: Official Helix API (Recommended)** 
-   - Enabled by providing `TWITCH_CLIENT_SECRET` in `.env`.
-   - Uses `oauth2/token` (Client Credentials flow) to get a 60-day App Access Token.
-   - Queries `helix/streams` directly. No scraping, 100% accurate.
-
-2. **Option B: Multi-Vector Scraper (Fallback)**
-   - Used when credentials are missing.
-   - **Vector 1: Dynamic State**: Matches player-state fragments like `"broadcast_type":"live"`.
-   - **Vector 2: Stream Presence**: Checks for active stream objects in the GQL-ready initial state.
-   - **Vector 3: Metadata Ingestion**: Scans for thumbnail patterns (`live_user_...`) in script strings.
-   - **Safety**: Strictly excludes cases with `"stream":null` or missing "Streaming" labels in the metadata to prevent stale-session false positives.
-   - Managed by Bun to avoid `reqwest` bot-protection blocks and ensure high performance.
-
-## Build & Debug
-
-- **Dev Mode**: `./run.sh dev` (Starts Vite + Tauri)
-- **Deep Diagnostics**: `./debug.sh vaapi` (Tests rendering nodes and vainfo)
-- **Encoder Test**: `./debug.sh encoders` (Verifies FFmpeg capability)
+```bash
+./run.sh dev      # Development mode
+./debug.sh vaapi  # VAAPI diagnostics
+```
 
 ## Data Storage
 
-- **.env**: Used for build-time injection of `TWITCH_USERNAME` and default keys.
-- **Tauri State**: Manages the life cycle of the FFmpeg sidecar process to prevent zombies.
+- `.env` - Stream keys and credentials
+- `tauri.conf.json` - App configuration
 
-## Known Gotchas
+---
 
-- **Resolution 400x320**: Window is no longer fixed; `syncWindowSize` calculates `scrollHeight` on every UI change.
-- **VAAPI Device**: Currently defaults to `renderD128`.
-- **X11 Exclusive**: Monitor detection is currently optimized for X11; Wayland support requires PipeWire implementation.旋
+&copy; 2026 [Omniversify](https://omniversify.com). All rights reserved.
+
+_Made by Moroccans, for the Omniverse_

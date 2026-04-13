@@ -23,15 +23,23 @@
       </header>
 
       <div class="studio-container">
-        <!-- Left: Chat Panel -->
-        <aside class="sidebar-left" id="chat-sidebar">
+        <!-- Left: Layers Panel -->
+        <aside class="sidebar-left" id="layers-sidebar">
           <div class="panel-header">
-            <span>MULTISTREAM CHAT</span>
-            <button class="panel-toggle" id="toggle-chat">«</button>
+            <span>SCENE LAYERS</span>
+            <button class="add-layer-btn" id="add-layer-btn">+</button>
           </div>
-          <div class="chat-placeholder">
-            <div class="icon">💬</div>
-            <p>Chat Integration Coming Soon</p>
+          <div class="layers-list" id="layers-list">
+            <!-- Dynamically populated -->
+          </div>
+          <div class="add-layer-menu hidden" id="add-layer-menu">
+            <button data-type="monitor">Monitor</button>
+            <button data-type="camera">Camera</button>
+            <button data-type="image">Image</button>
+            <button data-type="video">Video</button>
+            <button data-type="mic">Mic Input</button>
+            <button data-type="music">Music / Audio File</button>
+            <button data-type="placeholder">Placeholder</button>
           </div>
         </aside>
 
@@ -42,24 +50,30 @@
               <span class="badge" id="preview-status">PREVIEW OFF</span>
               <span class="badge live-badge hidden" id="live-indicator">LIVE</span>
             </div>
+            <!-- Usage Stats Overlay -->
+            <div class="usage-stats" id="usage-stats">
+              <span class="stat">CPU: <span id="stat-cpu">0.0</span>%</span>
+              <span class="stat">GPU: <span id="stat-gpu">0</span>%</span>
+              <span class="stat">VRAM: <span id="stat-vram">0</span>MB</span>
+            </div>
             <div class="preview-controls">
-              <button id="toggle-preview" class="btn-icon" title="Toggle Preview (Save Resources)">👁️</button>
+              <button id="toggle-preview" class="btn-icon" title="Toggle Preview">👁️</button>
               <button id="fullscreen-preview" class="btn-icon" title="Fullscreen Preview">⛶</button>
             </div>
           </div>
           <div class="preview-container">
             <canvas id="preview-canvas"></canvas>
             <div id="preview-overlay" class="preview-overlay">
-                <div class="overlay-msg">Preview Disabled (Low Resource Mode)</div>
+                <div class="overlay-msg">Preview Disabled</div>
             </div>
           </div>
           <div class="canvas-footer">
              <div class="status-row">
                 <div class="platform-status" id="twitch-status">
-                   <span class="dot"></span> Twitch: <span class="text">Checking...</span>
+                   <span class="dot"></span> Twitch: <span class="text">OFFLINE</span>
                 </div>
                 <div class="platform-status" id="kick-status">
-                   <span class="dot"></span> Kick: <span class="text">Checking...</span>
+                   <span class="dot"></span> Kick: <span class="text">OFFLINE</span>
                 </div>
              </div>
              <div class="timer" id="timer">00:00:00</div>
@@ -69,7 +83,7 @@
         <!-- Right: Controls Sidebar -->
         <aside class="sidebar-right">
           <div class="panel-header">
-            <span>STUDIO CONTROLS</span>
+            <span>STREAM SETTINGS</span>
           </div>
           
           <div class="scroll-content">
@@ -93,14 +107,10 @@
 
             <!-- Video Section -->
             <div class="section">
-              <label class="section-label">Video Source</label>
-              <div class="form-group">
-                 <select id="monitor"></select>
-              </div>
-              
+              <label class="section-label">Output Quality</label>
               <div class="form-row">
                 <div class="form-group">
-                  <label>Quality</label>
+                  <label>Resolution/FPS</label>
                   <select id="quality">
                     <option value="720p30">720p 30</option>
                     <option value="1080p30" selected>1080p 30</option>
@@ -110,61 +120,16 @@
                 <div class="form-group">
                   <label>Encoder</label>
                   <select id="encoder">
-                    <option value="auto">Auto</option>
-                    <option value="gpu">GPU</option>
-                    <option value="cpu">CPU</option>
+                    <option value="detecting">Detecting hardware...</option>
                   </select>
                 </div>
-              </div>
-            </div>
-
-            <!-- Camera Section -->
-            <div class="section">
-              <label class="section-label">Camera Overlay</label>
-              <select id="camera-device">
-                <option value="none">Disabled</option>
-              </select>
-              <div id="camera-settings" class="hidden">
-                 <div class="form-row">
-                    <div class="form-group">
-                       <label>Position</label>
-                       <select id="camera-pos">
-                          <option value="top-left">Top Left</option>
-                          <option value="top-right">Top Right</option>
-                          <option value="bottom-left">Bottom Left</option>
-                          <option value="bottom-right" selected>Bottom Right</option>
-                       </select>
-                    </div>
-                    <div class="form-group">
-                       <label>Size</label>
-                       <select id="camera-size">
-                          <option value="0.15">Small</option>
-                          <option value="0.25" selected>Medium</option>
-                          <option value="0.35">Large</option>
-                       </select>
-                    </div>
-                 </div>
-              </div>
-            </div>
-
-            <!-- Audio Section -->
-            <div class="section">
-              <label class="section-label">Audio Devices</label>
-              <div class="form-group">
-                <label>Input (Mic)</label>
-                <select id="audio-input"></select>
-                <input type="range" id="volume-input" min="0" max="150" value="100">
-              </div>
-              <div class="form-group">
-                <label>Output (System)</label>
-                <select id="audio-output"></select>
-                <input type="range" id="volume-output" min="0" max="150" value="100">
               </div>
             </div>
 
             <div class="section">
                <button class="action-btn" id="action-btn">GO LIVE</button>
                <button class="stop-btn" id="stop-btn">FORCE STOP</button>
+               <button class="action-btn" id="test-webrtc-btn" style="margin-top:10px; background:#4CAF50">Test WebRTC Capture</button>
             </div>
           </div>
 

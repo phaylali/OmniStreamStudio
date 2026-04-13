@@ -447,3 +447,145 @@ input[type="range"]::-webkit-slider-thumb {
 
 .status-indicator.live { background: var(--success); }
 .status-indicator.error { background: var(--error); }
+/* Layers Panel Updates */
+.layers-list {
+  flex: 1;
+  padding: 10px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.layer-card {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+}
+.layer-card.inactive {
+  opacity: 0.5;
+}
+.layer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.layer-title {
+  font-size: 11px;
+  font-weight: bold;
+  color: var(--text-primary);
+  text-transform: uppercase;
+}
+.layer-actions {
+  display: flex;
+  gap: 5px;
+}
+.layer-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px;
+}
+.layer-btn:hover { color: white; }
+.layer-props {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.layer-prop {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.layer-prop.full {
+  grid-column: span 2;
+}
+.layer-prop label {
+  font-size: 9px;
+  color: var(--text-secondary);
+}
+.layer-prop input, .layer-prop select {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  color: white;
+  padding: 4px;
+  border-radius: 4px;
+  font-size: 10px;
+  outline: none;
+}
+.usage-stats {
+  display: flex;
+  gap: 15px;
+  background: rgba(0,0,0,0.5);
+  padding: 4px 12px;
+  border-radius: 20px;
+  border: 1px solid rgba(255,255,255,0.1);
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.usage-stats .stat span {
+  color: var(--success);
+  font-weight: bold;
+}
+.add-layer-btn {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: white;
+  cursor: pointer;
+  border-radius: 4px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+.add-layer-btn:hover { background: var(--bg-secondary); }
+.audio-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0,0,0,0.5);
+  padding: 4px 12px;
+  border-radius: 20px;
+  border: 1px solid rgba(255,255,255,0.1);
+}
+.audio-controls label { font-size: 10px; color: var(--text-secondary); }
+.audio-controls select {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: white;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-size: 10px;
+  max-width: 80px;
+}
+.audio-controls input[type="range"] { width: 60px; }
+.add-layer-menu {
+  position: absolute;
+  left: 10px;
+  top: 40px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  border-radius: 6px;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+}
+.add-layer-menu button {
+  background: none;
+  border: none;
+  color: white;
+  text-align: left;
+  padding: 8px 16px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.add-layer-menu button:hover {
+  background: var(--bg-input);
+}
