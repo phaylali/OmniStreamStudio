@@ -1,67 +1,81 @@
-# OmniStream Studio V2: The Command Center
+# OmniStream Studio V2 Overhaul Plan
 
-This plan transforms the current sidepanel application into a full-featured streaming dashboard with multi-source management and a live preview.
+## Current Status: 🟠 INTERMEDIATE STAGE
 
-## User Review Required
+The application has been transformed from a single-column sidepanel into a professional, resizable 3-column Studio V2 dashboard. While the architectural foundation is solid, native hardware capture on Linux (X11/Wayland) remains an active challenge.
 
-> [!IMPORTANT]
-> **Performance Impact**: Adding a live preview and multiple audio/video filters in FFmpeg will increase CPU/GPU usage. I will include a "Low Resource Mode" to disable the preview during high-intensity gaming.
-> **Window Behavior**: The app will transition from a fixed-width sidepanel to a resizable window to accommodate the new multi-column layout.
+---
 
-## Proposed Changes
+## ✅ Completed in V2.0
 
-### 1. UI & Layout Overhaul
+- [x] **Studio Layout**: Resizable 3-column grid (Chat, Preview, Settings).
+- [x] **Glassmorphism UI**: High-end dark theme with glass background effects.
+- [x] **Multi-Platform logic**: Unified FFmpeg pipeline to stream to Twitch and Kick simultaneously.
+- [x] **Audio Routing**: Backend enumeration of Mic/System audio with volume mixing.
+- [x] **Camera Overlays**: Support for camera positioning and scaling on the canvas.
+- [x] **Real-time Preview Pipe**: High-performance MJPEG bridge from Rust to TS Canvas.
+- [x] **Virtual Sources**: "No Monitor" Test Pattern fallback using FFmpeg `lavfi`.
+- [ ] **Native UI Controls**: Fixed minimize, close, and dragging using Tauri-native APIs (`startDragging`).
 
-#### [MODIFY] [index.html](file:///home/phaylali/Documents/Apps/OmniStreamStudio/index.html)
+---
 
-- Implement a 3-column layout:
-  - **Left**: Multi-Stream Chat (Placeholder for now).
-  - **Center**: Main Canvas Preview with a "Toggle Preview" button.
-  - **Right**: Enhanced Settings Sidebar.
-- Add new groups for Audio (In/Out + Volume) and Video Devices.
+## ⛔ Current Blockers (Active Issues)
 
-#### [MODIFY] [styles.css](file:///home/phaylali/Documents/Apps/OmniStreamStudio/src/styles.css)
+1. **Real Monitor Capture**:
+   - Symptoms: Choosing a real monitor results in a black screen or "pauses" the preview.
+   - Analysis: FFmpeg `x11grab` is struggling to bind to the correct X11 display ID even with dynamic `:DISPLAY` detection. Likely a compositor permissions issue or Wayland incompatibility.
+2. **Preview Scalability**:
+   - The fullscreen preview (⛶) works via the Browser API but its visual fidelity on real hardware (once capture is fixed) needs validation.
+3. **Chat Panel**:
+   - Currently a UI placeholder; requires integration of the "Perfected Multistream Chat" logic.
 
-- Redesign the app using `display: grid` or `flex` for the multi-panel view.
-- Add styling for the preview area, volume sliders, and the new "Studio" look.
+---
 
-### 2. Device Management & Control
+## 🛠️ Next Implementation Phase
 
-#### [MODIFY] [lib.rs](file:///home/phaylali/Documents/Apps/OmniStreamStudio/src-tauri/src/lib.rs)
+### 1. Advanced Linux Capture
 
-- **New Commands**:
-  - `get_audio_devices`: Lists PulseAudio/PipeWire sources and sinks.
-  - `get_video_devices`: Lists `/dev/video*` nodes.
-- **FFmpeg Command Factory**:
-  - Support multiple audio inputs via `amix` filter.
-  - Implement `overlay` filters for the background image, monitor capture, and camera feed.
-  - Handle user-defined coordinates and sizes for the camera overlay.
+- Investigate **PipeWire** integration for backend capture to support Wayland users.
+- Add additional FFmpeg fallbacks for `kmsgrab` and `fbdev`.
+- Provide user logs in the UI for FFmpeg capture errors.
 
-#### [MODIFY] [main.ts](file:///home/phaylali/Documents/Apps/OmniStreamStudio/src/main.ts)
+### 2. Chat Integration
 
-- Update state to manage audio/video device selections and volume levels.
-- Implement the "Preview" toggle logic.
-- Add polling/event listeners for new dropdowns.
+- Import the user's multi-stream chat window code.
+- Implement the "Chat Sidebar" collapsing/expanding logic with live messages.
 
-### 3. Window Configuration
+### 3. Audio Polish
 
-#### [MODIFY] [tauri.conf.json](file:///home/phaylali/Documents/Apps/OmniStreamStudio/src-tauri/tauri.conf.json)
+- Add visual volume meters (peak meters) next to sliders.
+- Implement "Mute" toggles for input/output.
 
-- Set `resizable: true`.
-- Adjust initial dimensions to a "Studio" layout (e.g., 1200x800).
+---
 
-## Open Questions
+## 📋 Dev Notes
 
-1. **Preview Method**: Do you want the preview to be a low-fps "snapshot" (very light) or a smooth video stream (heavier)?
-2. **Audio Mixing**: Should the "Output Audio" capture your system sound (what you hear) and mix it with the mic?
-3. **Chat Integration**: For the chat perfection you mentioned, do you want me to create the container for it now, or wait until you share the existing code?
+- **Env Requirement**: Ensure `KICK_USERNAME` and `KICK_STREAM_URL` are set.
+- **Resource Mode**: Keep "Preview OFF" by default to ensure maximum FPS in games until capture is optimized.
 
-## Verification Plan
+## License
 
-### Manual Verification
+MIT License
 
-- **Device Detection**: Verify that your USB mic and headset appear in the new dropdowns.
-- **Volume Control**: Test if adjusting the slider actually changes the output volume in the stream.
-- **Layout Test**: Resize the window and ensure the preview and sidebars scale correctly.
-- **Overlay Test**: Verify the camera appears at the specified coordinates on top of the monitor.
-  旋
+## Support Us
+
+<p align="center">
+  <a href="https://ko-fi.com/omniversify">
+    <img src="https://raw.githubusercontent.com/phaylali/Omniversify/main/public/images/kofi_logo.svg" width="200" alt="Ko-Fi" />
+  </a>
+</p>
+
+<p align="center">
+  <strong>Keep us going</strong>
+</p>
+
+---
+
+&copy; 2026 [Omniversify](https://omniversify.com). All rights reserved.
+
+_Made by Moroccans, for the Omniverse_
+
+[![ReadMeSupportPalestine](https://raw.githubusercontent.com/Safouene1/support-palestine-banner/master/banner-project.svg)](https://donate.unrwa.org/-landing-page/en_EN)
