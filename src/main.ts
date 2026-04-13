@@ -252,7 +252,7 @@ async function startStream() {
     const selectedMon = monitors.find(m => m.id === monitorSelect.value);
     const res = selectedMon ? selectedMon.resolution : "1280x720";
 
-    const result = await invoke("start_stream", {
+    await invoke("start_stream", {
       configs,
       keyint: 60,
       encoderType: encoderSelect.value,

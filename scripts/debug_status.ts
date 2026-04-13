@@ -1,10 +1,17 @@
 /**
  * Debugging Twitch Status (User Client-ID)
  */
-const username = process.argv[2];
-const clientId = "jdilcqcoxfz0a6tslf4xrikthvjfxs"; // From .env
+export {};
 
-async function debugStatus(user) {
+const username = process.argv[2];
+if (!username) {
+  console.error("Usage: tsx scripts/debug_status.ts <username>");
+  process.exit(1);
+}
+
+const clientId = "jdilcqcoxfz0a6tslf4xrikthvjfxs";
+
+async function debugStatus(user: string) {
   const gqlQuery = [{
     operationName: "ChannelShell",
     variables: { login: user.toLowerCase() },
