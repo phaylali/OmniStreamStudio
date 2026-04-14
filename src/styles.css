@@ -490,6 +490,28 @@ input[type="range"]::-webkit-slider-thumb {
   padding: 2px;
 }
 .layer-btn:hover { color: white; }
+.video-ctrl-btn {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: white;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 10px;
+}
+.video-ctrl-btn:hover { background: var(--bg-secondary); }
+.video-ctrl-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.aspect-lock-btn {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: white;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 10px;
+}
+.aspect-lock-btn:hover { background: var(--bg-secondary); }
+.aspect-lock-btn.locked { background: var(--accent); border-color: var(--accent); }
 .layer-props {
   display: grid;
   grid-template-columns: 1fr 1fr;

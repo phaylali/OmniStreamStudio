@@ -36,7 +36,9 @@ pub struct AppState {
 
 impl Default for AppState {
     fn default() -> Self {
-        Self { stream: tokio::sync::Mutex::new(StreamState::default()) }
+        Self { 
+            stream: tokio::sync::Mutex::new(StreamState::default()),
+        }
     }
 }
 
@@ -56,12 +58,12 @@ pub struct EncoderInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum Layer {
-    Monitor { id: String, source_id: String, x: i32, y: i32, w: u32, h: u32, active: bool, volume: f32 },
+    Monitor { id: String, source_id: String, x: i32, y: i32, w: u32, h: u32, active: bool, volume: f32, audio_input: String },
     Camera { id: String, source_id: String, x: i32, y: i32, w: u32, h: u32, active: bool, volume: f32 },
     Image { id: String, path: String, x: i32, y: i32, w: u32, h: u32, active: bool },
-    Video { id: String, path: String, x: i32, y: i32, w: u32, h: u32, active: bool, loop_: bool, volume: f32 },
+    Video { id: String, path: String, x: i32, y: i32, w: u32, h: u32, active: bool, loop_: bool, volume: f32, playing: bool },
     Mic { id: String, source_id: String, volume: f32, active: bool },
-    Music { id: String, path: String, volume: f32, active: bool },
+    Music { id: String, path: String, volume: f32, active: bool, playing: bool },
     Placeholder { id: String, color: String, x: i32, y: i32, w: u32, h: u32, active: bool },
 }
 
@@ -115,12 +117,54 @@ fn get_audio_sinks() -> Result<Vec<DeviceInfo>, String> {
 #[tauri::command]
 fn get_video_devices() -> Result<Vec<DeviceInfo>, String> {
     let mut devices = Vec::new();
-    for i in 0..10 {
+    
+    // Try /dev/video0-31
+    for i in 0..32 {
         let path = format!("/dev/video{}", i);
         if std::path::Path::new(&path).exists() {
-            devices.push(DeviceInfo { id: path.clone(), name: format!("Webcam {}", i) });
+            // Try to get device name using v4l2-ctl
+            let name = if let Ok(output) = std::process::Command::new("v4l2-ctl")
+                .arg("-d")
+                .arg(&path)
+                .arg("--device-info")
+                .output()
+            {
+                let out = String::from_utf8_lossy(&output.stdout);
+                out.lines()
+                    .find(|l| l.starts_with("Device"))
+                    .map(|l| l.split(':').nth(1).unwrap_or("").trim().to_string())
+                    .unwrap_or_else(|| format!("Camera {}", i))
+            } else {
+                format!("Camera {}", i)
+            };
+            devices.push(DeviceInfo { id: path.clone(), name });
         }
     }
+    
+    // Also check /dev/v4l/by-id and /dev/v4l/by-path for additional devices
+    let by_id_path = std::path::Path::new("/dev/v4l/by-id");
+    let _by_path_path = std::path::Path::new("/dev/v4l/by-path");
+    
+    if let Ok(entries) = std::fs::read_dir(by_id_path) {
+        for entry in entries.flatten() {
+            if let Ok(name) = entry.file_name().into_string() {
+                if name.contains("video") {
+                    if let Ok(link) = std::fs::read_link(entry.path()) {
+                        if let Some(dev_name) = link.file_name() {
+                            let dev_str = dev_name.to_string_lossy().to_string();
+                            if !devices.iter().any(|d: &DeviceInfo| d.id.ends_with(&dev_str)) {
+                                devices.push(DeviceInfo { 
+                                    id: format!("/dev/{}", dev_str), 
+                                    name: name.replace("-video", "").replace("_", " ") 
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
     Ok(devices)
 }
 
@@ -251,7 +295,7 @@ fn apply_layers_to_ffmpeg(cmd: &mut Command, layers: &Vec<Layer>, framerate: u32
         if !active { continue; }
 
         match layer {
-            Layer::Monitor { source_id, x, y, w, h, volume, .. } => {
+            Layer::Monitor { source_id, x, y, w, h, volume, audio_input, .. } => {
                 // FIX: Look up native monitor resolution to avoid cropping
                 let mut native_res = "1920x1080".to_string();
                 if let Ok(output) = std::process::Command::new("xrandr").arg("--listmonitors").output() {
@@ -277,10 +321,9 @@ fn apply_layers_to_ffmpeg(cmd: &mut Command, layers: &Vec<Layer>, framerate: u32
                    .arg("-video_size").arg(&native_res)
                    .arg("-i").arg(source_id);
 
-                // Capture system audio from PulseAudio monitor sink (only if audio is needed)
-                if do_audio {
-                    let sys_audio = "alsa_output.@DEFAULT_SINK@.monitor";
-                    cmd.arg("-f").arg("pulse").arg("-i").arg(sys_audio);
+                // Capture audio only if user selected an audio source for this monitor
+                if do_audio && !audio_input.is_empty() && audio_input != "none" {
+                    cmd.arg("-f").arg("pulse").arg("-i").arg(&audio_input);
                     let a_link = format!("[{}:a]volume={}[a{}]", input_counter + 1, volume, idx);
                     filter_parts.push(a_link);
                     audio_inputs.push(format!("[a{}]", idx));
@@ -290,10 +333,14 @@ fn apply_layers_to_ffmpeg(cmd: &mut Command, layers: &Vec<Layer>, framerate: u32
                 filter_parts.push(format!("{}scale={}x{}:flags=fast_bilinear[mon{}]; {}[mon{}]overlay={}:{}[v_next{}]", 
                     in_link, w, h, idx, current_video_link, idx, x, y, idx));
                 current_video_link = format!("[v_next{}]", idx);
-                input_counter += if do_audio { 2 } else { 1 };
+                input_counter += if do_audio && !audio_input.is_empty() && audio_input != "none" { 2 } else { 1 };
             }
             Layer::Camera { source_id, x, y, w, h, volume, .. } => {
-                cmd.arg("-f").arg("video4linux2").arg("-i").arg(source_id);
+                cmd.arg("-f").arg("video4linux2")
+                   .arg("-input_format")
+                   .arg("mjpeg")
+                   .arg("-i")
+                   .arg(source_id);
                 // Only add audio input if we're including audio
                 if do_audio {
                     cmd.arg("-f").arg("lavfi").arg("-i").arg("anullsrc=r=44100:cl=stereo");
@@ -314,7 +361,10 @@ fn apply_layers_to_ffmpeg(cmd: &mut Command, layers: &Vec<Layer>, framerate: u32
                 current_video_link = format!("[v_next{}]", idx);
                 input_counter += 1;
             }
-            Layer::Video { path, x, y, w, h, loop_, volume, .. } => {
+            Layer::Video { path, x, y, w, h, loop_, volume, playing, .. } => {
+                // Skip video if paused
+                if !playing { continue; }
+                
                 if !std::path::Path::new(path).exists() { eprintln!("Skipping missing video: {}", path); continue; }
                 if *loop_ { cmd.arg("-stream_loop").arg("-1"); }
                 cmd.arg("-i").arg(path);
@@ -337,7 +387,10 @@ fn apply_layers_to_ffmpeg(cmd: &mut Command, layers: &Vec<Layer>, framerate: u32
                 audio_inputs.push(format!("[a{}]", idx));
                 input_counter += 1;
             }
-            Layer::Music { path, volume, .. } => {
+            Layer::Music { path, volume, playing, .. } => {
+                // Skip music if paused
+                if !playing { continue; }
+                
                 if !std::path::Path::new(path).exists() { eprintln!("Skipping missing music: {}", path); continue; }
                 if !do_audio { continue; }
                 cmd.arg("-stream_loop").arg("-1").arg("-i").arg(path);
@@ -388,9 +441,15 @@ async fn start_stream(
 ) -> Result<String, String> {
     info!("Starting pristine backend-compositor stream with encoder: {}", encoder_type);
 
+    // Stop existing stream if running to apply new settings
     {
-        let stream_state = state.stream.lock().await;
-        if stream_state.is_live { return Err("Stream already running".to_string()); }
+        let mut stream_state = state.stream.lock().await;
+        if stream_state.is_live { 
+            if let Some(mut c) = stream_state.child.take() {
+                let _ = c.kill().await;
+            }
+            stream_state.is_live = false;
+        }
     }
 
     let (_, framerate, bitrate) = match quality.as_str() {
@@ -450,12 +509,22 @@ async fn start_stream(
 
 #[tauri::command]
 async fn stop_stream(state: State<'_, AppState>) -> Result<(), String> {
-    let child = {
-        let mut stream_state = state.stream.lock().await;
-        stream_state.is_live = false;
-        stream_state.child.take()
-    };
-    if let Some(mut c) = child { let _ = c.kill().await; }
+    let mut stream_state = state.stream.lock().await;
+    stream_state.is_live = false;
+    if let Some(mut c) = stream_state.child.take() {
+        let _ = c.kill().await;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn force_stop_stream() -> Result<(), String> {
+    // Kill all FFmpeg processes
+    std::process::Command::new("pkill")
+        .arg("-9")
+        .arg("ffmpeg")
+        .spawn()
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -545,6 +614,107 @@ async fn check_twitch_channel(username: String) -> Result<bool, String> {
     }
 }
 
+// ============================================================================
+// CANVAS-BASED RENDERING MODULE (Alternative to FFmpeg filter graphs)
+// ============================================================================
+// To enable canvas mode, use the start_canvas_stream command instead of start_stream
+#[tauri::command]
+async fn start_canvas_stream(
+    configs: Vec<StreamConfig>,
+    width: u32,
+    height: u32,
+    framerate: u32,
+    bitrate: String,
+    encoder_type: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    info!("Starting canvas-based stream");
+    
+    {
+        let mut stream_state = state.stream.lock().await;
+        if stream_state.is_live {
+            if let Some(mut c) = stream_state.child.take() {
+                let _ = c.kill().await;
+            }
+        }
+    }
+    
+    let is_vaapi = encoder_type.starts_with("vaapi:");
+    let encoder = if is_vaapi { "h264_vaapi" } 
+                  else if encoder_type == "nvenc" { "h264_nvenc" }
+                  else { "libx264" };
+    
+    let mut cmd = Command::new("ffmpeg");
+    cmd.arg("-loglevel").arg("info");
+    
+    if is_vaapi {
+        let device_path = encoder_type.split(':').nth(1).unwrap_or("/dev/dri/renderD128");
+        cmd.arg("-init_hw_device").arg(format!("vaapi=gpu:{}", device_path));
+    }
+    
+    // Canvas sends raw YUV420P frames via stdin
+    cmd.arg("-f").arg("rawvideo")
+       .arg("-pix_fmt").arg("yuv420p")
+       .arg("-s").arg(format!("{}x{}", width, height))
+       .arg("-r").arg(framerate.to_string())
+       .arg("-i").arg("pipe:0");
+    
+    // Audio via lavfi silence (placeholder - can be replaced with actual audio)
+    cmd.arg("-f").arg("lavfi").arg("-i").arg("anullsrc=r=44100:cl=stereo");
+    
+    if is_vaapi {
+        cmd.arg("-vf").arg("format=nv12,hwupload");
+    }
+    
+    cmd.arg("-c:v").arg(encoder)
+       .arg("-b:v").arg(&bitrate)
+       .arg("-g").arg("60")
+       .arg("-c:a").arg("aac")
+       .arg("-b:a").arg("192k")
+       .arg("-flags").arg("+global_header");
+    
+    // Output
+    if configs.len() > 1 {
+        let tee_outputs: Vec<String> = configs.iter().map(|c| {
+            format!("[f=flv]{}", c.url.replace("|", "\\|"))
+        }).collect();
+        cmd.arg("-f").arg("tee").arg(tee_outputs.join("|"));
+    } else if let Some(config) = configs.first() {
+        cmd.arg("-f").arg("flv").arg(&config.url);
+    }
+    
+    cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    
+    match cmd.spawn() {
+        Ok(mut child) => {
+            let mut stream_state = state.stream.lock().await;
+            if let Some(stderr) = child.stderr.take() {
+                tokio::spawn(async move {
+                    let mut reader = BufReader::new(stderr).lines();
+                    while let Ok(Some(line)) = reader.next_line().await { 
+                        eprintln!("FFmpeg Canvas: {}", line); 
+                    }
+                });
+            }
+            stream_state.child = Some(child);
+            stream_state.is_live = true;
+            Ok("Canvas stream started".to_string())
+        }
+        Err(e) => Err(format!("Failed to spawn FFmpeg: {}", e)),
+    }
+}
+
+// Push frame data from canvas to FFmpeg stdin
+#[tauri::command]
+async fn push_canvas_frame(data: Vec<u8>, state: State<'_, AppState>) -> Result<(), String> {
+    let mut stream_state = state.stream.lock().await;
+    if let Some(stdin) = stream_state.child.as_mut().and_then(|c| c.stdin.as_mut()) {
+        use tokio::io::AsyncWriteExt;
+        stdin.write_all(&data).await.map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -558,9 +728,12 @@ pub fn run() {
             get_system_usage,
             start_stream,
             stop_stream,
+            force_stop_stream,
             start_preview,
             stop_preview,
-            check_twitch_channel
+            check_twitch_channel,
+            start_canvas_stream,
+            push_canvas_frame
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

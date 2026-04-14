@@ -21,6 +21,9 @@ interface Layer {
   color?: string;
   volume?: number;
   loop_?: boolean;
+  audio_input?: string;
+  playing?: boolean;
+  aspectLocked?: boolean;
 }
 
 // --- State ---
@@ -40,8 +43,6 @@ const state = {
 // --- DOM Elements ---
 const actionBtn = document.getElementById("action-btn") as HTMLButtonElement;
 const stopBtn = document.getElementById("stop-btn") as HTMLButtonElement;
-const minimizeBtn = document.getElementById("minimize-btn") as HTMLButtonElement;
-const closeBtn = document.getElementById("close-btn") as HTMLButtonElement;
 const timerEl = document.getElementById("timer") as HTMLElement;
 const liveIndicator = document.getElementById("live-indicator") as HTMLElement;
 const statusIndicator = document.getElementById("status-indicator") as HTMLElement;
@@ -69,21 +70,42 @@ const previewOverlay = document.getElementById("preview-overlay") as HTMLElement
 const previewStatus = document.getElementById("preview-status") as HTMLElement;
 const fullscreenPreviewBtn = document.getElementById("fullscreen-preview") as HTMLButtonElement;
 const titleBar = document.querySelector(".title-bar") as HTMLElement;
+const maximizeBtn = document.getElementById("maximize-btn") as HTMLButtonElement;
 
 // --- Window Controls ---
 function setupWindowControls() {
+  const minimizeBtn = document.getElementById("minimize-btn");
+  const closeBtn = document.getElementById("close-btn");
+
   if (titleBar) {
-    titleBar.addEventListener("mousedown", async (e: MouseEvent) => {
-      if ((e.target as HTMLElement).closest(".window-controls")) return;
+    titleBar.addEventListener("mousedown", async (e: Event) => {
+      const target = e.target as HTMLElement;
+      if (target.closest(".window-controls")) return;
       await appWindow.startDragging();
     });
   }
 
-  if (minimizeBtn) minimizeBtn.addEventListener("click", () => appWindow.minimize());
-  if (closeBtn) closeBtn.addEventListener("click", () => {
-     if (state.isLive) invoke("stop_stream");
-     appWindow.close();
-  });
+  if (minimizeBtn) {
+    minimizeBtn.addEventListener("click", () => appWindow.minimize());
+  }
+  
+  if (maximizeBtn) {
+    maximizeBtn.addEventListener("click", async () => {
+      const isMaximized = await appWindow.isMaximized();
+      if (isMaximized) {
+        appWindow.unmaximize();
+      } else {
+        appWindow.maximize();
+      }
+    });
+  }
+  
+  if (closeBtn) {
+    closeBtn.addEventListener("click", () => {
+      if (state.isLive) invoke("stop_stream");
+      appWindow.close();
+    });
+  }
 
   if (fullscreenPreviewBtn) {
     fullscreenPreviewBtn.addEventListener("click", () => {
@@ -228,12 +250,15 @@ function addLayer(type: LayerType) {
     y: 0,
     w: type === 'camera' ? 640 : 1920,
     h: type === 'camera' ? 480 : 1080,
+    loop_: type === 'video' || type === 'music',
+    playing: type === 'video' || type === 'music',
   };
 
   if (type === 'monitor' && state.availableMonitors.length > 0) {
     const rMonitor = state.availableMonitors[0];
     newLayer.source_id = rMonitor?.id;
     newLayer.volume = 1.0;
+    newLayer.audio_input = "none";
     if (rMonitor?.resolution) {
         const [rw, rh] = rMonitor.resolution.split('x').map(Number);
         newLayer.w = rw || 1920; newLayer.h = rh || 1080;
@@ -295,6 +320,11 @@ function renderLayers() {
     if (layer.type === "monitor") {
       propsHtml += `<div class="layer-prop full"><label>Source</label>
         <select class="prop-input" data-prop="source_id">${createSourceOptions(state.availableMonitors, layer.source_id)}</select></div>
+        <div class="layer-prop full"><label>Audio Input</label>
+          <select class="prop-input" data-prop="audio_input">
+            <option value="none" ${layer.audio_input === "none" ? "selected" : ""}>None</option>
+            ${state.availableAudio.map(a => `<option value="${a.id}" ${layer.audio_input === a.id ? "selected" : ""}>${a.name}</option>`).join("")}
+          </select></div>
         <div class="layer-prop full" style="display:flex; align-items:center;">
           <label style="width: 50px;">Vol</label>
           <input class="prop-input" data-prop="volume" type="range" min="0" max="2" step="0.05" value="${layer.volume || 1.0}" style="flex-grow:1;">
@@ -317,6 +347,11 @@ function renderLayers() {
             propsHtml += `<div class="layer-prop full" style="display:flex; align-items:center;">
               <label style="width: 50px;">Vol</label>
               <input class="prop-input" data-prop="volume" type="range" min="0" max="2" step="0.05" value="${layer.volume || 1.0}" style="flex-grow:1;">
+            </div>
+            <div class="layer-prop full" style="display:flex; gap: 5px;">
+              <button class="video-ctrl-btn" data-action="play" data-id="${layer.id}" ${layer.playing !== false ? 'disabled' : ''}>▶</button>
+              <button class="video-ctrl-btn" data-action="pause" data-id="${layer.id}" ${layer.playing === false ? 'disabled' : ''}>⏸</button>
+              <button class="video-ctrl-btn" data-action="restart" data-id="${layer.id}">↺</button>
             </div>`;
         }
     } else if (layer.type === "mic") {
@@ -332,8 +367,11 @@ function renderLayers() {
         propsHtml += `
           <div class="layer-prop"><label>X</label><input class="prop-input" data-prop="x" type="number" value="${layer.x}"></div>
           <div class="layer-prop"><label>Y</label><input class="prop-input" data-prop="y" type="number" value="${layer.y}"></div>
-          <div class="layer-prop"><label>Width</label><input class="prop-input" data-prop="w" type="number" value="${layer.w}"></div>
-          <div class="layer-prop"><label>Height</label><input class="prop-input" data-prop="h" type="number" value="${layer.h}"></div>
+          <div class="layer-prop" style="display:flex; align-items:center; gap:4px;">
+            <label>W</label><input class="prop-input aspect-w" data-prop="w" type="number" value="${layer.w}" style="width:50px">
+            <button class="aspect-lock-btn ${layer.aspectLocked ? 'locked' : ''}" data-id="${layer.id}" title="Lock aspect ratio">${layer.aspectLocked ? '🔒' : '🔓'}</button>
+          </div>
+          <div class="layer-prop"><label>H</label><input class="prop-input" data-prop="h" type="number" value="${layer.h}"></div>
         `;
     }
 
@@ -367,7 +405,11 @@ function renderLayers() {
          const val = el.type === "number" ? parseFloat(el.value) : el.value;
          updateLayer(layer.id, prop, val);
 
-         if (state.preview) restartPreview();
+         if (state.isLive) {
+           restartStream();
+         } else if (state.preview) {
+           restartPreview();
+         }
       });
     });
 
@@ -384,9 +426,49 @@ function renderLayers() {
                  renderLayers();
                  if (state.preview) restartPreview();
              }
-         } catch(e) { console.error("File picking failed", e); }
+} catch(e) { console.error("File picking failed", e); }
+       });
+    });
+
+    const videoCtrls = card.querySelectorAll(".video-ctrl-btn");
+    videoCtrls.forEach(btn => {
+      btn.addEventListener("click", () => {
+        const action = btn.getAttribute("data-action");
+        const layerId = layer.id;
+        
+        if (action === "play") {
+          updateLayer(layerId, "playing", true);
+        } else if (action === "pause") {
+          updateLayer(layerId, "playing", false);
+        } else if (action === "restart") {
+          updateLayer(layerId, "playing", true);
+          setTimeout(() => {
+            updateLayer(layerId, "playing", false);
+            updateLayer(layerId, "playing", true);
+          }, 50);
+        }
+        renderLayers();
+        if (state.preview) restartPreview();
       });
     });
+
+    const aspectLockBtn = card.querySelector(".aspect-lock-btn");
+    if (aspectLockBtn) {
+      aspectLockBtn.addEventListener("click", () => {
+        updateLayer(layer.id, "aspectLocked", !layer.aspectLocked);
+        renderLayers();
+      });
+    }
+
+    // Handle aspect ratio locking for width changes
+    const wInput = card.querySelector(".aspect-w") as HTMLInputElement;
+    if (wInput && layer.aspectLocked) {
+      wInput.addEventListener("change", () => {
+        const ratio = layer.w / layer.h;
+        layer.w = parseFloat(wInput.value);
+        layer.h = Math.round(layer.w / ratio);
+      });
+    }
 
     layersList.appendChild(card);
   });
@@ -419,6 +501,13 @@ async function restartPreview() {
 // --- Streaming Control ---
 async function startStream() {
   if (state.isLive) return;
+
+  // Stop preview if running to free up camera
+  if (state.preview) {
+    await invoke("stop_preview");
+    // Wait for camera to be released
+    await new Promise(r => setTimeout(r, 500));
+  }
 
   const configs = [];
   if (state.platforms.twitch) {
@@ -475,13 +564,30 @@ async function stopStream() {
   updateStatus("Ready");
 }
 
+async function restartStream() {
+  const platforms = { ...state.platforms };
+  const startTime = state.startTime;
+  
+  await invoke("stop_stream");
+  state.isLive = false;
+  stopTimer();
+  stopStatsPolling();
+  
+  await new Promise(r => setTimeout(r, 300));
+  
+  // Restore state and restart
+  state.platforms = platforms;
+  state.startTime = startTime;
+  await startStream();
+}
+
 actionBtn.addEventListener("click", () => {
   if (state.isLive) stopStream();
   else startStream();
 });
 
 stopBtn.addEventListener("click", async () => {
-  await invoke("stop_stream");
+  await invoke("force_stop_stream");
   location.reload();
 });
 
