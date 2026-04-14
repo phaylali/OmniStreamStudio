@@ -449,9 +449,10 @@ async fn start_stream(
     keyint: u32,
     encoder_type: String,
     quality: String,
+    window: tauri::Window,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    info!("Starting pristine backend-compositor stream with encoder: {}", encoder_type);
+    info!("Starting unified pipeline stream with encoder: {}", encoder_type);
 
     // Stop existing stream if running to apply new settings
     {
@@ -470,6 +471,51 @@ async fn start_stream(
         _ => ("1920x1080", 30, "4500k"),
     };
 
+    // Create FIFO for preview output
+    let preview_fifo = "/tmp/omni_unified_preview";
+    let _ = std::process::Command::new("rm").arg("-f").arg(preview_fifo).output();
+    let _ = std::process::Command::new("mkfifo").arg(preview_fifo).output();
+
+    // Start preview reader in background BEFORE spawning FFmpeg
+    let window_clone = window.clone();
+    let preview_fifo_owned = preview_fifo.to_string();
+    tokio::spawn(async move {
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+        if let Ok(file) = std::fs::File::open(&preview_fifo_owned) {
+            use std::io::Read;
+            let mut reader = std::io::BufReader::with_capacity(262144, file);
+            let mut buffer = Vec::new();
+            let mut in_frame = false;
+            let mut chunk = [0u8; 16384];
+            loop {
+                match reader.read(&mut chunk) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        for i in 0..n {
+                            let b = chunk[i];
+                            if !in_frame {
+                                if b == 0xFF { buffer.push(b); }
+                                else if !buffer.is_empty() && buffer[buffer.len()-1] == 0xFF && b == 0xD8 {
+                                    buffer.push(b); in_frame = true;
+                                } else { buffer.clear(); }
+                                continue;
+                            }
+                            buffer.push(b);
+                            if buffer.len() > 2 && buffer[buffer.len()-2] == 0xFF && b == 0xD9 {
+                                let base64 = data_encoding::BASE64.encode(&buffer);
+                                let _ = window_clone.emit("preview-frame", base64);
+                                buffer.clear();
+                                in_frame = false;
+                            }
+                            if buffer.len() > 5000000 { buffer.clear(); in_frame = false; }
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        }
+    });
+
     let mut cmd = Command::new("ffmpeg");
     cmd.arg("-loglevel").arg("info");
     cmd.arg("-threads").arg("4");
@@ -482,26 +528,23 @@ async fn start_stream(
 
     let video_out_link = apply_layers_to_ffmpeg(&mut cmd, &layers, framerate, is_vaapi, true)?;
 
-    let encoder_v = if is_vaapi { "h264_vaapi".to_string() }
-    else if encoder_type == "nvenc" { "h264_nvenc".to_string() }
-    else { "libx264".to_string() };
+    // Get stream URL
+    let stream_url = configs.first().map(|c| c.url.as_str()).unwrap_or("");
+    let stream_escaped = stream_url.replace("|", "\\|");
 
+    // Use tee to output to both stream (encoded) and preview (copy/mjpeg)
     cmd.arg("-map").arg(&video_out_link).arg("-map").arg("[outa]")
-       .arg("-c:v").arg(encoder_v)
+       .arg("-c:v").arg(if is_vaapi { "h264_vaapi".to_string() } else if encoder_type == "nvenc" { "h264_nvenc".to_string() } else { "libx264".to_string() })
        .arg("-preset").arg("ultrafast")
        .arg("-tune").arg("zerolatency")
        .arg("-b:v").arg(bitrate)
        .arg("-g").arg(keyint.to_string())
        .arg("-c:a").arg("aac")
        .arg("-b:a").arg("192k")
-       .arg("-flags").arg("+global_header");
-
-    if configs.len() > 1 {
-        let tee_outputs: Vec<String> = configs.iter().map(|c| format!("[f=flv]{}", c.url.replace("|", "\\|"))).collect();
-        cmd.arg("-f").arg("tee").arg(tee_outputs.join("|"));
-    } else if let Some(config) = configs.first() {
-        cmd.arg("-f").arg("flv").arg(&config.url);
-    }
+       .arg("-flags").arg("+global_header")
+       // Tee: first output is stream (FLV), second is preview (rawvideo to FIFO)
+       .arg("-f").arg("tee")
+       .arg(format!("[f=flv]{}|[f=rawvideo]{}", stream_escaped, preview_fifo));
 
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 

@@ -52,8 +52,9 @@ bun run tauri build
 
 ## Known Issues
 
-- Monitor capture may have lag in some configurations (x11grab limitation)
-- Camera and preview may have lag depending on system resources
+- Monitor/camera capture may have lag (x11grab limitation on X11)
+- gpu-screen-recorder is used when available for better performance
+- Camera preview fails during live streaming (device busy) - camera still streams correctly
 
 ## License
 

@@ -566,7 +566,7 @@ async function startStream() {
     });
   }
 
-  updateStatus("Starting Engine...");
+updateStatus("Starting Engine...");
   try {
     await invoke("start_stream", {
       configs,
@@ -574,6 +574,7 @@ async function startStream() {
       keyint: 60,
       encoderType: encoderSelect.value,
       quality: qualitySelect.value,
+      window: appWindow,
     });
 
     state.isLive = true;

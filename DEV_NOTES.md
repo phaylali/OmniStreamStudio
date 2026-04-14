@@ -133,15 +133,26 @@ Required permissions in `capabilities/default.json`:
    - Thread limiting to prevent CPU overload
    - Non-VAAPI path optimized with copy instead of extra processing
 
-7. **Layer Reordering** (2026-04-14)
+8. **gpu-screen-recorder Integration** (2026-04-14)
+   - Auto-detects if gpu-screen-recorder is installed
+   - Uses named pipe (FIFO) to connect GPU capture to FFmpeg
+   - Falls back to x11grab if not available
+   - Monitor names resolved from `--list-monitors` output
+   - Note: When streaming with camera, preview camera will fail (device busy) - this is expected
+
+9. **Layer Reordering** (2026-04-14)
    - Fixed: layer order changes now properly restart stream when live
    - Previously only restarted preview, not stream
 
 ## Known Limitations
 
-1. **Kick Streaming**: Dual platform muxing may have issues
-2. **Monitor Geometry**: Offset monitors require precise xrandr parsing
-3. **Wayland**: PipeWire capture not yet implemented
+1. **Monitor/Camera Lag**: x11grab has inherent limitations. Alternatives being researched:
+   - **kmsgrab**: DRM-based capture, requires CAP_SYS_ADMIN
+   - **gpu-screen-recorder**: GPU-accelerated, lowest CPU impact (AMD/Intel/NVIDIA)
+   - **OBS Studio**: Uses different capture methods that avoid x11grab issues
+2. **Kick Streaming**: Dual platform muxing may have issues
+3. **Monitor Geometry**: Offset monitors require precise xrandr parsing
+4. **Wayland**: PipeWire capture not yet implemented
 
 ## Commands
 
