@@ -335,50 +335,53 @@ fn apply_layers_to_ffmpeg(cmd: &mut Command, layers: &Vec<Layer>, framerate: u32
                 current_video_link = format!("[v_next{}]", idx);
                 input_counter += if do_audio && !audio_input.is_empty() && audio_input != "none" { 2 } else { 1 };
             }
-            Layer::Camera { source_id, x, y, w, h, volume, .. } => {
-                cmd.arg("-f").arg("video4linux2")
-                   .arg("-input_format")
-                   .arg("mjpeg")
-                   .arg("-i")
-                   .arg(source_id);
-                // Only add audio input if we're including audio
-                if do_audio {
-                    cmd.arg("-f").arg("lavfi").arg("-i").arg("anullsrc=r=44100:cl=stereo");
-                    let a_link = format!("[{}:a]volume={}[a{}]", input_counter + 1, volume, idx);
-                    filter_parts.push(a_link);
-                    audio_inputs.push(format!("[a{}]", idx));
-                }
-                filter_parts.push(format!("{}[{}:v]scale={}x{}:flags=fast_bilinear[cam{}]; {}[cam{}]overlay={}:{}[v_next{}]", 
-                    "", input_counter, w, h, idx, current_video_link, idx, x, y, idx));
-                current_video_link = format!("[v_next{}]", idx);
-                input_counter += if do_audio { 2 } else { 1 };
-            }
-            Layer::Image { path, x, y, w, h, .. } => {
-                if !std::path::Path::new(path).exists() { eprintln!("Skipping missing image: {}", path); continue; }
-                cmd.arg("-loop").arg("1").arg("-i").arg(path);
-                filter_parts.push(format!("{}[{}:v]scale={}x{}:flags=fast_bilinear[img{}]; {}[img{}]overlay={}:{}[v_next{}]", 
-                    "", input_counter, w, h, idx, current_video_link, idx, x, y, idx));
-                current_video_link = format!("[v_next{}]", idx);
-                input_counter += 1;
-            }
-            Layer::Video { path, x, y, w, h, loop_, volume, playing, .. } => {
-                // Skip video if paused
-                if !playing { continue; }
-                
-                if !std::path::Path::new(path).exists() { eprintln!("Skipping missing video: {}", path); continue; }
-                if *loop_ { cmd.arg("-stream_loop").arg("-1"); }
-                cmd.arg("-i").arg(path);
-                filter_parts.push(format!("{}[{}:v]scale={}x{}:flags=fast_bilinear[vid{}]; {}[vid{}]overlay={}:{}[v_next{}]", 
-                    "", input_counter, w, h, idx, current_video_link, idx, x, y, idx));
-                current_video_link = format!("[v_next{}]", idx);
-                // Extract video audio and apply volume (only if audio is needed)
-                if do_audio {
-                    let a_link = format!("[{}:a]volume={}[a{}]", input_counter, volume, idx);
-                    filter_parts.push(a_link);
-                    audio_inputs.push(format!("[a{}]", idx));
-                }
-                input_counter += 1;
-            }
+             Layer::Camera { source_id, x, y, w, h, volume, .. } => {
+                 cmd.arg("-f").arg("video4linux2")
+                    .arg("-input_format")
+                    .arg("mjpeg")
+                    .arg("-i")
+                    .arg(source_id);
+                 // Only add audio input if we're including audio
+                 if do_audio {
+                     cmd.arg("-f").arg("lavfi").arg("-i").arg("anullsrc=r=44100:cl=stereo");
+                     let a_link = format!("[{}:a]volume={}[a{}]", input_counter + 1, volume, idx);
+                     filter_parts.push(a_link);
+                     audio_inputs.push(format!("[a{}]", idx));
+                 }
+                 let in_link = format!("[{}:v]", input_counter);
+                 filter_parts.push(format!("{}scale={}x{}:flags=fast_bilinear[cam{}]; {}[cam{}]overlay={}:{}[v_next{}]", 
+                     in_link, w, h, idx, current_video_link, idx, x, y, idx));
+                 current_video_link = format!("[v_next{}]", idx);
+                 input_counter += if do_audio { 2 } else { 1 };
+             }
+             Layer::Image { path, x, y, w, h, .. } => {
+                 if !std::path::Path::new(path).exists() { eprintln!("Skipping missing image: {}", path); continue; }
+                 cmd.arg("-loop").arg("1").arg("-i").arg(path);
+                 let in_link = format!("[{}:v]", input_counter);
+                 filter_parts.push(format!("{}scale={}x{}:flags=fast_bilinear[img{}]; {}[img{}]overlay={}:{}[v_next{}]", 
+                     in_link, w, h, idx, current_video_link, idx, x, y, idx));
+                 current_video_link = format!("[v_next{}]", idx);
+                 input_counter += 1;
+             }
+             Layer::Video { path, x, y, w, h, loop_, volume, playing, .. } => {
+                 // Skip video if paused
+                 if !playing { continue; }
+                 
+                 if !std::path::Path::new(path).exists() { eprintln!("Skipping missing video: {}", path); continue; }
+                 if *loop_ { cmd.arg("-stream_loop").arg("-1"); }
+                 cmd.arg("-i").arg(path);
+                 let in_link = format!("[{}:v]", input_counter);
+                 filter_parts.push(format!("{}scale={}x{}:flags=fast_bilinear[vid{}]; {}[vid{}]overlay={}:{}[v_next{}]", 
+                     in_link, w, h, idx, current_video_link, idx, x, y, idx));
+                 current_video_link = format!("[v_next{}]", idx);
+                 // Extract video audio and apply volume (only if audio is needed)
+                 if do_audio {
+                     let a_link = format!("[{}:a]volume={}[a{}]", input_counter, volume, idx);
+                     filter_parts.push(a_link);
+                     audio_inputs.push(format!("[a{}]", idx));
+                 }
+                 input_counter += 1;
+             }
             Layer::Mic { source_id, volume, .. } => {
                 if !do_audio { continue; }
                 cmd.arg("-f").arg("pulse").arg("-i").arg(source_id);

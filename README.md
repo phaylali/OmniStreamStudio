@@ -11,6 +11,7 @@ A lightweight, GPU-accelerated streaming application for Twitch and Kick with a 
 - **Dual Streaming** - Stream to Twitch and Kick simultaneously
 - **Preview Pipeline** - MJPEG bridge from Rust to HTML Canvas
 - **Low Resource Usage** - Optimized for dedicated streaming machines
+- **Window Controls** - Working minimize, maximize, and close buttons
 
 ## Quick Start
 
@@ -38,6 +39,13 @@ bun install
 # or
 bun run tauri build
 ```
+
+## Recent Fixes
+
+- **Window Controls**: Fixed minimize, maximize, and close buttons with proper Tauri permissions
+- **Layers Panel**: Fixed scrolling for long layer lists
+- **Video Controls**: Fixed button sizing (play/pause/restart)
+- **FFmpeg Pipeline**: Fixed camera and video source conflict causing preview freeze
 
 ## License
 

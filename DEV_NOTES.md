@@ -18,6 +18,7 @@ Professional GPU-accelerated streaming encoder with multi-layer compositing for 
 1. **Frontend (`main.ts`)** - UI, layer management, Tauri IPC
 2. **Backend (`lib.rs`)** - FFmpeg process, device enumeration, stats
 3. **Status Script (`status.ts`)** - Bun-based channel status checker
+4. **Capabilities (`default.json`)** - Tauri window permissions
 
 ## Layer System
 
@@ -26,7 +27,7 @@ Professional GPU-accelerated streaming encoder with multi-layer compositing for 
 | Monitor | x11grab | Geometry detection, X/Y offset |
 | Camera | video4linux2 | V4L2 devices |
 | Image | file input | Looping, scale |
-| Video | file input | Loop, volume control |
+| Video | file input | Loop, volume control, play/pause |
 | Mic | pulseaudio | Device selection + volume |
 | Music | file input | Auto-loop, volume |
 | Placeholder | lavfi color | Color block |
@@ -76,6 +77,47 @@ FFmpeg encoding → RTMP output
 - **GPU**: `/sys/class/drm/card*/device/hwmon/*/gpu_busy_percent`
 - **VRAM**: `/sys/class/drm/card*/device/mem_info_vram_used`
 
+## Window Controls
+
+The app uses a custom title bar with decorations disabled. Window controls are implemented via Tauri window APIs:
+
+```typescript
+appWindow.minimize();
+appWindow.maximize();
+appWindow.unmaximize();
+appWindow.close();
+appWindow.isMaximized();
+appWindow.startDragging();
+```
+
+Required permissions in `capabilities/default.json`:
+- `core:window:allow-minimize`
+- `core:window:allow-maximize`
+- `core:window:allow-unmaximize`
+- `core:window:allow-close`
+- `core:window:allow-is-maximized`
+- `core:window:allow-start-dragging`
+
+## Recent Fixes
+
+1. **Window Controls** (2026-04-14)
+   - Added required window permissions in `capabilities/default.json`
+   - Fixed CSS pointer-events on window controls
+   - Now working: minimize, maximize, close
+
+2. **Layers Panel Scrolling** (2026-04-14)
+   - Added `min-height: 0` to sidebar and layers list
+   - Fixed overflow handling for long layer lists
+
+3. **Video Control Buttons** (2026-04-14)
+   - Changed from full width to auto-sizing
+   - Added `flex: 0 1 auto` and `min-width: 28px`
+
+4. **FFmpeg Pipeline** (2026-04-14)
+   - Fixed camera and video source conflict
+   - Proper input linking format in filter graph
+   - All layer types now use consistent filter syntax
+
 ## Known Limitations
 
 1. **Kick Streaming**: Dual platform muxing may have issues
@@ -87,12 +129,14 @@ FFmpeg encoding → RTMP output
 ```bash
 ./run.sh dev      # Development mode
 ./debug.sh vaapi  # VAAPI diagnostics
+./debug.sh check  # System check
 ```
 
 ## Data Storage
 
 - `.env` - Stream keys and credentials
 - `tauri.conf.json` - App configuration
+- `src-tauri/capabilities/default.json` - Window permissions
 
 ---
 
