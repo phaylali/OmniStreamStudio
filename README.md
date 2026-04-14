@@ -44,8 +44,16 @@ bun run tauri build
 
 - **Window Controls**: Fixed minimize, maximize, and close buttons with proper Tauri permissions
 - **Layers Panel**: Fixed scrolling for long layer lists
-- **Video Controls**: Fixed button sizing (play/pause/restart)
+- **Video Controls**: Fixed button sizing (play/pause/restart) and layout
+- **Aspect Ratio Lock**: Fixed bidirectional sync between width and height
 - **FFmpeg Pipeline**: Fixed camera and video source conflict causing preview freeze
+- **Performance**: Optimized CPU usage (preview 10fps, ultrafast preset, thread limiting)
+- **Layer Reordering**: Now properly restarts stream when live
+
+## Known Issues
+
+- Monitor capture may have lag in some configurations (x11grab limitation)
+- Camera and preview may have lag depending on system resources
 
 ## License
 

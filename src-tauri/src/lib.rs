@@ -368,6 +368,8 @@ fn apply_layers_to_ffmpeg(cmd: &mut Command, layers: &Vec<Layer>, framerate: u32
                  if !playing { continue; }
                  
                  if !std::path::Path::new(path).exists() { eprintln!("Skipping missing video: {}", path); continue; }
+                 // Use -re flag to read at native framerate (reduces CPU for file inputs)
+                 cmd.arg("-re");
                  if *loop_ { cmd.arg("-stream_loop").arg("-1"); }
                  cmd.arg("-i").arg(path);
                  let in_link = format!("[{}:v]", input_counter);
@@ -417,6 +419,13 @@ fn apply_layers_to_ffmpeg(cmd: &mut Command, layers: &Vec<Layer>, framerate: u32
         if !filter_complex.is_empty() { filter_complex.push_str("; "); }
         filter_complex.push_str(&format!("{}format=nv12,hwupload[outv_hw]", current_video_link));
         current_video_link = "[outv_hw]".to_string();
+    } else {
+        // Add fast bilinear scaling without additional processing for CPU efficiency
+        if current_video_link != "[0:v]" && !current_video_link.contains("scale") {
+            if !filter_complex.is_empty() { filter_complex.push_str("; "); }
+            filter_complex.push_str(&format!("{}copy[v_out]", current_video_link));
+            current_video_link = "[v_out]".to_string();
+        }
     }
 
     if include_audio {
@@ -463,6 +472,7 @@ async fn start_stream(
 
     let mut cmd = Command::new("ffmpeg");
     cmd.arg("-loglevel").arg("info");
+    cmd.arg("-threads").arg("4");
 
     let is_vaapi = encoder_type.starts_with("vaapi:");
     if is_vaapi {
@@ -478,6 +488,8 @@ async fn start_stream(
 
     cmd.arg("-map").arg(&video_out_link).arg("-map").arg("[outa]")
        .arg("-c:v").arg(encoder_v)
+       .arg("-preset").arg("ultrafast")
+       .arg("-tune").arg("zerolatency")
        .arg("-b:v").arg(bitrate)
        .arg("-g").arg(keyint.to_string())
        .arg("-c:a").arg("aac")
@@ -542,13 +554,15 @@ async fn start_preview(
     
     let mut cmd = Command::new("ffmpeg");
     cmd.arg("-loglevel").arg("error"); 
+    cmd.arg("-threads").arg("2"); // Limit threads for preview
 
     // Re-use layer pipeline minus actual hardware encoding
-    let video_out_link = apply_layers_to_ffmpeg(&mut cmd, &layers, 15, false, false)?;
+    // Use lower framerate (10 fps) to reduce CPU usage in preview
+    let video_out_link = apply_layers_to_ffmpeg(&mut cmd, &layers, 10, false, false)?;
 
-    // Output only MJPEG video - image2pipe doesn't support audio muxing
+    // Output MJPEG with ultrafast preset for better performance
     cmd.arg("-map").arg(&video_out_link);
-    cmd.arg("-c:v").arg("mjpeg").arg("-qscale").arg("2").arg("-f").arg("image2pipe").arg("-");
+    cmd.arg("-c:v").arg("mjpeg").arg("-qscale").arg("5").arg("-preset").arg("ultrafast").arg("-f").arg("image2pipe").arg("-");
     
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     

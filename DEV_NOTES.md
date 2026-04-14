@@ -111,12 +111,31 @@ Required permissions in `capabilities/default.json`:
 
 3. **Video Control Buttons** (2026-04-14)
    - Changed from full width to auto-sizing
-   - Added `flex: 0 1 auto` and `min-width: 28px`
+   - Added `flex: 0 1 auto` and `min-width: 36px`
+   - Larger icons (14px) with hover effects
+   - Fixed layout to display in a row
 
 4. **FFmpeg Pipeline** (2026-04-14)
    - Fixed camera and video source conflict
    - Proper input linking format in filter graph
    - All layer types now use consistent filter syntax
+
+5. **UI Improvements** (2026-04-14)
+   - Aspect ratio lock fixed for bidirectional sync
+   - Layer card styling improved with better spacing
+   - Dropdown menus have custom arrow indicators
+   - Better visual hierarchy and organization
+
+6. **Performance Optimizations** (2026-04-14)
+   - Preview: Reduced framerate to 10fps, threads=2, ultrafast preset
+   - Stream: Added -preset ultrafast -tune zerolatency
+   - Video files: Added -re flag for native framerate reading
+   - Thread limiting to prevent CPU overload
+   - Non-VAAPI path optimized with copy instead of extra processing
+
+7. **Layer Reordering** (2026-04-14)
+   - Fixed: layer order changes now properly restart stream when live
+   - Previously only restarted preview, not stream
 
 ## Known Limitations
 

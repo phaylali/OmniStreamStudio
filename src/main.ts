@@ -294,7 +294,11 @@ function moveLayer(index: number, up: boolean) {
     [state.layers[index + 1], state.layers[index]] = [state.layers[index], state.layers[index + 1]];
   }
   renderLayers();
-  if (state.preview) restartPreview();
+  if (state.isLive) {
+    restartStream();
+  } else if (state.preview) {
+    restartPreview();
+  }
 }
 
 function updateLayer(id: string, prop: keyof Layer, value: any) {
@@ -318,60 +322,65 @@ function renderLayers() {
 
     let propsHtml = "";
     if (layer.type === "monitor") {
-      propsHtml += `<div class="layer-prop full"><label>Source</label>
+      propsHtml += `<div class="layer-prop full">
+        <label>Source</label>
         <select class="prop-input" data-prop="source_id">${createSourceOptions(state.availableMonitors, layer.source_id)}</select></div>
-        <div class="layer-prop full"><label>Audio Input</label>
+        <div class="layer-prop full audio-input-row">
+          <label>Audio Input</label>
           <select class="prop-input" data-prop="audio_input">
             <option value="none" ${layer.audio_input === "none" ? "selected" : ""}>None</option>
             ${state.availableAudio.map(a => `<option value="${a.id}" ${layer.audio_input === a.id ? "selected" : ""}>${a.name}</option>`).join("")}
           </select></div>
-        <div class="layer-prop full" style="display:flex; align-items:center;">
-          <label style="width: 50px;">Vol</label>
-          <input class="prop-input" data-prop="volume" type="range" min="0" max="2" step="0.05" value="${layer.volume || 1.0}" style="flex-grow:1;">
+        <div class="layer-prop full volume-row">
+          <label>Vol</label>
+          <input class="prop-input" data-prop="volume" type="range" min="0" max="2" step="0.05" value="${layer.volume || 1.0}">
         </div>`;
     } else if (layer.type === "camera") {
-        propsHtml += `<div class="layer-prop full"><label>Device</label>
+        propsHtml += `<div class="layer-prop full">
+        <label>Device</label>
         <select class="prop-input" data-prop="source_id">${createSourceOptions(state.availableCameras, layer.source_id)}</select></div>
-        <div class="layer-prop full" style="display:flex; align-items:center;">
-          <label style="width: 50px;">Vol</label>
-          <input class="prop-input" data-prop="volume" type="range" min="0" max="2" step="0.05" value="${layer.volume || 1.0}" style="flex-grow:1;">
+        <div class="layer-prop full volume-row">
+          <label>Vol</label>
+          <input class="prop-input" data-prop="volume" type="range" min="0" max="2" step="0.05" value="${layer.volume || 1.0}">
         </div>`;
     } else if (layer.type === "image" || layer.type === "video" || layer.type === "music") {
-        propsHtml += `<div class="layer-prop full"><label>File Path</label>
-        <div style="display:flex; width: 100%; gap: 5px;">
-           <input class="prop-input" data-prop="path" type="text" value="${layer.path || ""}" style="flex-grow:1; min-width:0;">
-           <button class="file-pick-btn" data-id="${layer.id}" style="padding:4px 8px; font-size:12px; cursor:pointer;" type="button">Browse</button>
+        propsHtml += `<div class="layer-prop full">
+        <label>File Path</label>
+        <div class="file-path-row">
+           <input class="prop-input" data-prop="path" type="text" value="${layer.path || ""}">
+           <button class="file-pick-btn" data-id="${layer.id}" type="button">Browse</button>
         </div>
         </div>`;
         if (layer.type === "video" || layer.type === "music") {
-            propsHtml += `<div class="layer-prop full" style="display:flex; align-items:center;">
-              <label style="width: 50px;">Vol</label>
-              <input class="prop-input" data-prop="volume" type="range" min="0" max="2" step="0.05" value="${layer.volume || 1.0}" style="flex-grow:1;">
+            propsHtml += `<div class="layer-prop full volume-row">
+              <label>Vol</label>
+              <input class="prop-input" data-prop="volume" type="range" min="0" max="2" step="0.05" value="${layer.volume || 1.0}">
             </div>
-            <div class="layer-prop full" style="display:flex; gap: 5px;">
+            <div class="layer-prop full video-controls-row">
               <button class="video-ctrl-btn" data-action="play" data-id="${layer.id}" ${layer.playing !== false ? 'disabled' : ''}>▶</button>
               <button class="video-ctrl-btn" data-action="pause" data-id="${layer.id}" ${layer.playing === false ? 'disabled' : ''}>⏸</button>
               <button class="video-ctrl-btn" data-action="restart" data-id="${layer.id}">↺</button>
             </div>`;
         }
     } else if (layer.type === "mic") {
-        propsHtml += `<div class="layer-prop full"><label>Device</label>
+        propsHtml += `<div class="layer-prop full">
+        <label>Device</label>
         <select class="prop-input" data-prop="source_id">${createSourceOptions(state.availableAudio, layer.source_id)}</select></div>
-        <div class="layer-prop full" style="display:flex; align-items:center;">
-          <label style="width: 50px;">Vol</label>
-          <input class="prop-input" data-prop="volume" type="range" min="0" max="2" step="0.05" value="${layer.volume || 1.0}" style="flex-grow:1;">
+        <div class="layer-prop full volume-row">
+          <label>Vol</label>
+          <input class="prop-input" data-prop="volume" type="range" min="0" max="2" step="0.05" value="${layer.volume || 1.0}">
         </div>`;
     }
 
     if (layer.type !== "mic" && layer.type !== "music") {
         propsHtml += `
-          <div class="layer-prop"><label>X</label><input class="prop-input" data-prop="x" type="number" value="${layer.x}"></div>
-          <div class="layer-prop"><label>Y</label><input class="prop-input" data-prop="y" type="number" value="${layer.y}"></div>
-          <div class="layer-prop" style="display:flex; align-items:center; gap:4px;">
-            <label>W</label><input class="prop-input aspect-w" data-prop="w" type="number" value="${layer.w}" style="width:50px">
+          <div class="layer-prop full position-row">
+            <div class="pos-input"><label>X</label><input class="prop-input" data-prop="x" type="number" value="${layer.x}"></div>
+            <div class="pos-input"><label>Y</label><input class="prop-input" data-prop="y" type="number" value="${layer.y}"></div>
+            <div class="pos-input"><label>W</label><input class="prop-input aspect-w" data-prop="w" type="number" value="${layer.w}"></div>
+            <div class="pos-input"><label>H</label><input class="prop-input aspect-h" data-prop="h" type="number" value="${layer.h}"></div>
             <button class="aspect-lock-btn ${layer.aspectLocked ? 'locked' : ''}" data-id="${layer.id}" title="Lock aspect ratio">${layer.aspectLocked ? '🔒' : '🔓'}</button>
           </div>
-          <div class="layer-prop"><label>H</label><input class="prop-input" data-prop="h" type="number" value="${layer.h}"></div>
         `;
     }
 
@@ -462,12 +471,35 @@ function renderLayers() {
 
     // Handle aspect ratio locking for width changes
     const wInput = card.querySelector(".aspect-w") as HTMLInputElement;
-    if (wInput && layer.aspectLocked) {
-      wInput.addEventListener("change", () => {
-        const ratio = layer.w / layer.h;
-        layer.w = parseFloat(wInput.value);
-        layer.h = Math.round(layer.w / ratio);
-      });
+    const hInput = card.querySelector(".aspect-h") as HTMLInputElement;
+    
+    const updateHeightFromWidth = () => {
+      if (layer.aspectLocked) {
+        const ratio = (layer.w || 1) / (layer.h || 1);
+        const newW = parseFloat(wInput?.value || layer.w.toString());
+        layer.w = newW;
+        layer.h = Math.round(newW / ratio);
+        if (hInput) hInput.value = layer.h.toString();
+        if (state.preview) restartPreview();
+      }
+    };
+    
+    const updateWidthFromHeight = () => {
+      if (layer.aspectLocked) {
+        const ratio = (layer.w || 1) / (layer.h || 1);
+        const newH = parseFloat(hInput?.value || layer.h.toString());
+        layer.h = newH;
+        layer.w = Math.round(newH * ratio);
+        if (wInput) wInput.value = layer.w.toString();
+        if (state.preview) restartPreview();
+      }
+    };
+    
+    if (wInput) {
+      wInput.addEventListener("input", updateHeightFromWidth);
+    }
+    if (hInput) {
+      hInput.addEventListener("input", updateWidthFromHeight);
     }
 
     layersList.appendChild(card);
