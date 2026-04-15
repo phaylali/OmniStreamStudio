@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OmniStream Studio</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+      /* Canvas container styles */
+      #konva-container {
+        width: 100%;
+        height: 400px;
+        background: #000;
+        border: 1px solid #333;
+      }
+      #konva-container canvas {
+        display: block;
+      }
+      .canvas-main {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .preview-container {
+        position: relative;
+        background: #0a0a0a;
+        border: 1px solid #333;
+        border-radius: 4px;
+        overflow: hidden;
+      }
+      #preview-canvas {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="app" class="studio-layout">
+      <!-- Title Bar -->
+      <header class="title-bar" data-tauri-drag-region>
+        <div class="brand">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 2 1.5-1.5a2 2 0 0 1 2.83 0L12 3l1.17.17a2 2 0 0 0 1.66 0l.68.68a2 2 0 0 1 0 2.98L17 9.5v5l-1 1-1-1v-4.32L11.17 8.5a2 2 0 0 0-1.66 0l-.68.68a2 2 0 0 1-2.98 0L5 10.84V19l-1.5 1.5z"/><path d="m9 14 3 3 3-3"/><path d="M5 19 8 16 5 13"/><path d="M19 5 22 8 19 11"/><circle cx="17" cy="17" r="3"/></svg>
+          <span class="title">OmniStream Studio <span class="v2">V2</span></span>
+        </div>
+        <div class="toolbar">
+          <button class="toolbar-btn" id="undo-btn" title="Undo (Ctrl+Z)">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
+          </button>
+          <button class="toolbar-btn" id="redo-btn" title="Redo (Ctrl+Y)">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7"/></svg>
+          </button>
+          <button class="toolbar-btn danger" id="delete-btn" title="Delete (Del)">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+          </button>
+        </div>
+        <div class="window-controls">
+          <button class="minimize" id="minimize-btn" title="Minimize">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>
+          </button>
+          <button class="maximize" id="maximize-btn" title="Maximize">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/></svg>
+          </button>
+          <button class="close" id="close-btn" title="Close">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <div class="studio-container">
+        <!-- Left: Layers Panel -->
+        <aside class="sidebar-left" id="layers-sidebar">
+          <div class="panel-header">
+            <span>SCENE LAYERS</span>
+            <button class="add-layer-btn" id="add-layer-btn" title="Add Layer">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+            </button>
+          </div>
+          <div class="layers-list" id="layers-list">
+            <!-- Dynamically populated -->
+          </div>
+          <div class="add-layer-menu hidden" id="add-layer-menu">
+            <button data-type="monitor">Monitor</button>
+            <button data-type="camera">Camera</button>
+            <button data-type="image">Image</button>
+            <button data-type="video">Video</button>
+            <button data-type="mic">Mic Input</button>
+            <button data-type="music">Music / Audio File</button>
+            <button data-type="placeholder">Placeholder</button>
+          </div>
+        </aside>
+
+        <!-- Center: Preview Canvas -->
+        <section class="canvas-main">
+          <div class="preview-header">
+            <div class="preview-badges">
+              <span class="badge" id="preview-status">CANVAS</span>
+              <span class="badge live-badge hidden" id="live-indicator">LIVE</span>
+            </div>
+            <div class="usage-stats" id="usage-stats">
+              <span class="stat">Canvas: <span id="stat-cpu">1920x1080</span></span>
+            </div>
+          </div>
+          <div class="preview-container" id="konva-container">
+            <!-- Konva canvas will be rendered here -->
+          </div>
+          <div class="preview-container">
+            <canvas id="preview-canvas" width="480" height="270"></canvas>
+          </div>
+<div class="canvas-footer">
+              <div class="status-row">
+                 <div class="platform-status" id="twitch-status">
+                   <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/></svg>
+                   <span class="text">Twitch: OFFLINE</span>
+                 </div>
+                 <div class="platform-status" id="kick-status">
+                   <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.5 7.5l-3 3-3-3V4l3-3 3 3v3.5zm-3 6l3-3 3 3v-3l-3 3-3-3v3z"/></svg>
+                   <span class="text">Kick: OFFLINE</span>
+                 </div>
+              </div>
+             <div class="timer" id="timer">00:00:00</div>
+          </div>
+        </section>
+
+        <!-- Right: Controls Sidebar -->
+        <aside class="sidebar-right">
+          <div class="panel-header">
+            <span>STREAM SETTINGS</span>
+          </div>
+          
+          <div class="scroll-content">
+            <!-- Platform Toggle -->
+            <div class="section">
+              <label class="section-label">Platforms</label>
+              <div class="platforms-grid">
+                <button class="platform-btn active" id="toggle-twitch" data-platform="twitch">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/></svg>
+                  <span>Twitch</span>
+                </button>
+                <button class="platform-btn" id="toggle-kick" data-platform="kick">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.5 7.5l-3 3-3-3V4l3-3 3 3v3.5zm-3 6l3-3 3 3v-3l-3 3-3-3v3z"/></svg>
+                  <span>Kick</span>
+                </button>
+              </div>
+            </div>
+
+            <div id="twitch-ingest-group" class="section hidden">
+              <label class="section-label">Twitch Ingest</label>
+              <select id="ingest"></select>
+            </div>
+
+            <!-- Video Section -->
+            <div class="section">
+              <label class="section-label">Output Quality</label>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Resolution/FPS</label>
+                  <select id="quality">
+                    <option value="720p30">720p 30</option>
+                    <option value="1080p30" selected>1080p 30</option>
+                    <option value="1080p60">1080p 60</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Encoder</label>
+                  <select id="encoder">
+                    <option value="detecting">Detecting hardware...</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div class="section">
+               <button class="action-btn" id="action-btn">
+                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                 GO LIVE
+               </button>
+               <button class="stop-btn" id="stop-btn" disabled>
+                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/></svg>
+                 FORCE STOP
+               </button>
+            </div>
+          </div>
+
+          <div class="sidebar-footer">
+             <div class="status-bar">
+                <span class="status-indicator" id="status-indicator"></span>
+                <span id="status-text">Ready</span>
+             </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+    <script type="module" src="main.ts"></script>
+  </body>
+</html>
