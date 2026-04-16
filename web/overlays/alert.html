@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Alert Overlay</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 400px;
+      height: 150px;
+      background: transparent;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Inter', Arial, sans-serif;
+      overflow: hidden;
+    }
+    .alert {
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      padding: 20px 30px;
+      border-radius: 12px;
+      border: 2px solid #9146ff;
+      box-shadow: 0 0 30px rgba(145, 70, 255, 0.4);
+      text-align: center;
+      animation: slideIn 0.5s ease-out;
+    }
+    .icon {
+      font-size: 36px;
+      margin-bottom: 8px;
+    }
+    .title {
+      font-size: 14px;
+      color: #9146ff;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+    }
+    .message {
+      font-size: 24px;
+      color: #fff;
+      font-weight: bold;
+      margin-top: 8px;
+    }
+    @keyframes slideIn {
+      from { transform: translateX(-100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.05); }
+    }
+  </style>
+</head>
+<body>
+  <div class="alert">
+    <div class="icon">🔔</div>
+    <div class="title">New Follower!</div>
+    <div class="message" id="username">User123</div>
+  </div>
+  <script>
+    // Listen for overlay events
+    document.addEventListener('overlay-event', (e) => {
+      const data = e.detail;
+      const message = document.getElementById('username');
+      
+      if (data.type === 'follow') {
+        document.querySelector('.icon').textContent = '🔔';
+        document.querySelector('.title').textContent = 'New Follower!';
+        message.textContent = data.user || data.username || 'User';
+      } else if (data.type === 'donation') {
+        document.querySelector('.icon').textContent = '💰';
+        document.querySelector('.title').textContent = 'Donation!';
+        message.textContent = data.amount ? `$${data.amount}` : data.message || 'Thank you!';
+      } else if (data.type === 'subscribe') {
+        document.querySelector('.icon').textContent = '⭐';
+        document.querySelector('.title').textContent = 'New Subscriber!';
+        message.textContent = data.user || data.username || 'User';
+      } else if (data.message) {
+        message.textContent = data.message;
+      }
+      
+      // Re-trigger animation
+      const alert = document.querySelector('.alert');
+      alert.style.animation = 'none';
+      alert.offsetHeight; // Trigger reflow
+      alert.style.animation = 'slideIn 0.5s ease-out, pulse 1s ease-in-out 0.5s infinite';
+    });
+  </script>
+</body>
+</html>

@@ -14,7 +14,9 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.7.0",
     "@tauri-apps/plugin-opener": "^2",
+    "html2canvas": "^1.4.1",
     "konva": "^10.2.5",
+    "mp4-muxer": "^5.2.2",
     "ws": "^8.20.0"
   },
   "devDependencies": {

@@ -21,12 +21,16 @@ cleanup_ports() {
   pkill -f "server.cjs" 2>/dev/null || true
   pkill -f "node.*6969" 2>/dev/null || true
   pkill -f "node.*6970" 2>/dev/null || true
+  pkill -f "node.*6971" 2>/dev/null || true
+  pkill -f "node.*6972" 2>/dev/null || true
   pkill -f "omnistreamstudio" 2>/dev/null || true
   pkill -f "ffmpeg" 2>/dev/null || true
   
   # Kill any processes using the ports
   lsof -ti:6969 | xargs -r kill -9 2>/dev/null || true
   lsof -ti:6970 | xargs -r kill -9 2>/dev/null || true
+  lsof -ti:6971 | xargs -r kill -9 2>/dev/null || true
+  lsof -ti:6972 | xargs -r kill -9 2>/dev/null || true
   lsof -ti:1420 | xargs -r kill -9 2>/dev/null || true
   lsof -ti:1421 | xargs -r kill -9 2>/dev/null || true
   

@@ -6,32 +6,13 @@
     <title>OmniStream Studio</title>
     <link rel="stylesheet" href="styles.css">
     <style>
-      /* Canvas container styles */
       #konva-container {
         width: 100%;
-        height: 400px;
+        height: 100%;
         background: #000;
-        border: 1px solid #333;
       }
       #konva-container canvas {
         display: block;
-      }
-      .canvas-main {
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-      }
-      .preview-container {
-        position: relative;
-        background: #0a0a0a;
-        border: 1px solid #333;
-        border-radius: 4px;
-        overflow: hidden;
-      }
-      #preview-canvas {
-        display: block;
-        width: 100%;
-        height: auto;
       }
     </style>
   </head>
@@ -68,11 +49,12 @@
         </div>
       </header>
 
+      <!-- Main Content Area -->
       <div class="studio-container">
-        <!-- Left: Layers Panel -->
+        <!-- Left: Layers Panel (Fixed Width) -->
         <aside class="sidebar-left" id="layers-sidebar">
           <div class="panel-header">
-            <span>SCENE LAYERS</span>
+            <span>LAYERS</span>
             <button class="add-layer-btn" id="add-layer-btn" title="Add Layer">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
             </button>
@@ -80,117 +62,150 @@
           <div class="layers-list" id="layers-list">
             <!-- Dynamically populated -->
           </div>
-          <div class="add-layer-menu hidden" id="add-layer-menu">
-            <button data-type="monitor">Monitor</button>
-            <button data-type="camera">Camera</button>
-            <button data-type="image">Image</button>
-            <button data-type="video">Video</button>
-            <button data-type="mic">Mic Input</button>
-            <button data-type="music">Music / Audio File</button>
-            <button data-type="placeholder">Placeholder</button>
-          </div>
         </aside>
 
-        <!-- Center: Preview Canvas -->
-        <section class="canvas-main">
-          <div class="preview-header">
-            <div class="preview-badges">
-              <span class="badge" id="preview-status">CANVAS</span>
-              <span class="badge live-badge hidden" id="live-indicator">LIVE</span>
+        <!-- Add Layer Dialog -->
+        <div class="dialog-overlay hidden" id="add-layer-dialog">
+          <div class="dialog">
+            <div class="dialog-header">
+              <span>Add Layer</span>
+              <button class="dialog-close" id="dialog-close">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg>
+              </button>
             </div>
-            <div class="usage-stats" id="usage-stats">
-              <span class="stat">Canvas: <span id="stat-cpu">1920x1080</span></span>
+            <div class="dialog-tabs">
+              <button class="dialog-tab active" data-type="image">Image</button>
+              <button class="dialog-tab" data-type="html">HTML</button>
+              <button class="dialog-tab" data-type="text">Text</button>
             </div>
-          </div>
-          <div class="preview-container" id="konva-container">
-            <!-- Konva canvas will be rendered here -->
-          </div>
-          <div class="preview-container">
-            <canvas id="preview-canvas" width="480" height="270"></canvas>
-          </div>
-<div class="canvas-footer">
-              <div class="status-row">
-                 <div class="platform-status" id="twitch-status">
-                   <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/></svg>
-                   <span class="text">Twitch: OFFLINE</span>
-                 </div>
-                 <div class="platform-status" id="kick-status">
-                   <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.5 7.5l-3 3-3-3V4l3-3 3 3v3.5zm-3 6l3-3 3 3v-3l-3 3-3-3v3z"/></svg>
-                   <span class="text">Kick: OFFLINE</span>
-                 </div>
+            <div class="dialog-content">
+              <!-- Image tab -->
+              <div class="dialog-panel active" data-panel="image">
+                <input type="file" id="image-file-input" accept="image/*" class="hidden">
+                <button class="dialog-action" id="select-image-btn">Select Image File</button>
+                <div class="url-divider">
+                  <span>or enter URL</span>
+                </div>
+                <div class="form-group">
+                  <input type="text" id="url-input" placeholder="https://example.com/image.png">
+                </div>
+                <button class="dialog-action primary" id="load-url-btn">Load URL</button>
               </div>
-             <div class="timer" id="timer">00:00:00</div>
+              <!-- HTML tab -->
+              <div class="dialog-panel" data-panel="html">
+                <input type="file" id="html-file-input" accept=".html,.htm" class="hidden">
+                <button class="dialog-action" id="select-html-btn">Select HTML File</button>
+                <div class="url-divider">
+                  <span>or enter URL</span>
+                </div>
+                <div class="form-group">
+                  <input type="text" id="html-url-input" placeholder="https://example.com/widget">
+                </div>
+                <button class="dialog-action primary" id="load-html-btn">Load HTML</button>
+              </div>
+              <!-- Text tab -->
+              <div class="dialog-panel" data-panel="text">
+                <div class="form-group">
+                  <label>Text</label>
+                  <input type="text" id="text-input" placeholder="Hello World">
+                </div>
+                <div class="form-group">
+                  <label>Font Size</label>
+                  <select id="text-font-size">
+                    <option value="24">24px</option>
+                    <option value="36" selected>36px</option>
+                    <option value="48">48px</option>
+                    <option value="60">60px</option>
+                    <option value="72">72px</option>
+                    <option value="96">96px</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Color</label>
+                  <input type="color" id="text-color" value="#ffffff">
+                </div>
+                <button class="dialog-action primary" id="add-text-btn">Add Text</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Center: Canvas Area (Flexible) -->
+        <section class="canvas-main">
+          <div class="canvas-wrapper" id="canvas-wrapper">
+            <div class="preview-container" id="konva-container">
+              <!-- Konva canvas will be rendered here -->
+            </div>
           </div>
         </section>
 
-        <!-- Right: Controls Sidebar -->
-        <aside class="sidebar-right">
+        <!-- Right: Chat Placeholder (Fixed Width) -->
+        <aside class="sidebar-right chat-sidebar" id="chat-sidebar">
           <div class="panel-header">
-            <span>STREAM SETTINGS</span>
+            <span>CHAT</span>
           </div>
-          
-          <div class="scroll-content">
-            <!-- Platform Toggle -->
-            <div class="section">
-              <label class="section-label">Platforms</label>
-              <div class="platforms-grid">
-                <button class="platform-btn active" id="toggle-twitch" data-platform="twitch">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/></svg>
-                  <span>Twitch</span>
-                </button>
-                <button class="platform-btn" id="toggle-kick" data-platform="kick">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.5 7.5l-3 3-3-3V4l3-3 3 3v3.5zm-3 6l3-3 3 3v-3l-3 3-3-3v3z"/></svg>
-                  <span>Kick</span>
-                </button>
-              </div>
-            </div>
-
-            <div id="twitch-ingest-group" class="section hidden">
-              <label class="section-label">Twitch Ingest</label>
-              <select id="ingest"></select>
-            </div>
-
-            <!-- Video Section -->
-            <div class="section">
-              <label class="section-label">Output Quality</label>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>Resolution/FPS</label>
-                  <select id="quality">
-                    <option value="720p30">720p 30</option>
-                    <option value="1080p30" selected>1080p 30</option>
-                    <option value="1080p60">1080p 60</option>
-                  </select>
-                </div>
-                <div class="form-group">
-                  <label>Encoder</label>
-                  <select id="encoder">
-                    <option value="detecting">Detecting hardware...</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            <div class="section">
-               <button class="action-btn" id="action-btn">
-                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                 GO LIVE
-               </button>
-               <button class="stop-btn" id="stop-btn" disabled>
-                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/></svg>
-                 FORCE STOP
-               </button>
-            </div>
-          </div>
-
-          <div class="sidebar-footer">
-             <div class="status-bar">
-                <span class="status-indicator" id="status-indicator"></span>
-                <span id="status-text">Ready</span>
-             </div>
+          <div class="chat-placeholder">
+            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <p>Chat coming soon</p>
           </div>
         </aside>
       </div>
+
+      <!-- Bottom Bar: Stream Controls -->
+      <footer class="bottom-bar">
+        <div class="stream-controls">
+          <div class="platform-toggles">
+            <button class="platform-toggle active" id="toggle-twitch" data-platform="twitch">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/></svg>
+              <span>Twitch</span>
+            </button>
+            <button class="platform-toggle" id="toggle-kick" data-platform="kick">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.5 7.5l-3 3-3-3V4l3-3 3 3v3.5zm-3 6l3-3 3 3v-3l-3 3-3-3v3z"/></svg>
+              <span>Kick</span>
+            </button>
+          </div>
+          
+          <div class="ingest-select">
+            <select id="ingest">
+              <option value="">Select Ingest</option>
+              <option value="sjc">San Jose</option>
+              <option value="lax">Los Angeles</option>
+              <option value="den">Denver</option>
+              <option value="atl">Atlanta</option>
+              <option value="nyc">New York</option>
+              <option value="chi">Chicago</option>
+            </select>
+          </div>
+          
+          <div class="quality-select">
+            <select id="quality">
+              <option value="720p30">720p 30fps</option>
+              <option value="1080p30" selected>1080p 30fps</option>
+              <option value="1080p60">1080p 60fps</option>
+            </select>
+          </div>
+          
+          <div class="stream-buttons">
+            <button class="action-btn" id="action-btn">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              GO LIVE
+            </button>
+            <button class="stop-btn" id="stop-btn" disabled>
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/></svg>
+              STOP
+            </button>
+            <button class="force-stop-btn" id="force-stop-btn" title="Force Stop All">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg>
+            </button>
+          </div>
+        </div>
+        
+        <div class="status-bar">
+          <span class="status-indicator" id="status-indicator"></span>
+          <span id="status-text">Ready</span>
+          <span class="timer" id="timer">00:00:00</span>
+        </div>
+      </footer>
     </div>
     <script type="module" src="main.ts"></script>
   </body>
