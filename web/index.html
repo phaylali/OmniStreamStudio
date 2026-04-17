@@ -54,6 +54,15 @@
       <div class="studio-container">
         <!-- Left: Layers Panel (Fixed Width) -->
         <aside class="sidebar-left" id="layers-sidebar">
+          <div class="panel-header" id="scenes-header" style="display: flex; justify-content: space-between; align-items: center;">
+            <span>SCENES</span>
+            <button class="add-scene-btn" id="add-scene-btn" title="Add Scene">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+            </button>
+          </div>
+          <div class="scenes-list" id="scenes-list">
+            <!-- Dynamically populated -->
+          </div>
           <div class="panel-header">
             <span>LAYERS</span>
             <button class="add-layer-btn" id="add-layer-btn" title="Add Layer">

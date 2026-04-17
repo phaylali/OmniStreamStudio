@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OmniStream Studio</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Montserrat:wght@700&family=Oswald:wght@700&family=Pacifico&family=Roboto:wght@700&display=swap" rel="stylesheet">
     <style>
       #konva-container {
         width: 100%;
@@ -14,8 +15,9 @@
         display: block;
       }
     </style>
-    <script type="module" crossorigin src="/assets/index-DqjBGAPT.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-DUBEEh7b.css">
+    <script type="module" crossorigin src="/assets/index-RHMmKDQb.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/sql-CzUKSiNS.js">
+    <link rel="stylesheet" crossorigin href="/assets/index-CAVNMK7x.css">
   </head>
 
   <body>
@@ -54,6 +56,15 @@
       <div class="studio-container">
         <!-- Left: Layers Panel (Fixed Width) -->
         <aside class="sidebar-left" id="layers-sidebar">
+          <div class="panel-header" id="scenes-header" style="display: flex; justify-content: space-between; align-items: center;">
+            <span>SCENES</span>
+            <button class="add-scene-btn" id="add-scene-btn" title="Add Scene">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+            </button>
+          </div>
+          <div class="scenes-list" id="scenes-list">
+            <!-- Dynamically populated -->
+          </div>
           <div class="panel-header">
             <span>LAYERS</span>
             <button class="add-layer-btn" id="add-layer-btn" title="Add Layer">
@@ -78,6 +89,7 @@
               <button class="dialog-tab active" data-type="image">Image</button>
               <button class="dialog-tab" data-type="html">HTML</button>
               <button class="dialog-tab" data-type="text">Text</button>
+              <button class="dialog-tab" data-type="widget">Widgets</button>
             </div>
             <div class="dialog-content">
               <!-- Image tab -->
@@ -126,6 +138,52 @@
                   <input type="color" id="text-color" value="#ffffff">
                 </div>
                 <button class="dialog-action primary" id="add-text-btn">Add Text</button>
+              </div>
+              <!-- Widget tab -->
+              <div class="dialog-panel" data-panel="widget">
+                <div class="form-group">
+                  <label>Widget Type</label>
+                  <select id="widget-type-select">
+                    <option value="clock">Digital Clock</option>
+                    <option value="countdown">Countdown Timer</option>
+                    <option value="twitch-viewers">Twitch Viewers Count</option>
+                    <option value="kick-viewers">Kick Viewers Count</option>
+                    <option value="alerts">Event Alerts (Follow/Sub)</option>
+                  </select>
+                </div>
+                <div class="form-group" id="widget-config-group" style="display:none;">
+                  <label id="widget-config-label">Minutes</label>
+                  <input type="number" id="widget-config-input" value="5">
+                </div>
+                <div class="form-group">
+                  <label>Font Family</label>
+                  <select id="widget-font">
+                    <option value="Inter">Inter</option>
+                    <option value="Roboto">Roboto</option>
+                    <option value="Montserrat">Montserrat</option>
+                    <option value="Oswald">Oswald</option>
+                    <option value="Pacifico">Pacifico</option>
+                  </select>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label>Text Color</label>
+                    <input type="color" id="widget-color" value="#00fa9a">
+                  </div>
+                  <div class="form-group">
+                    <label>Background</label>
+                    <input type="color" id="widget-bg-color" value="#1a1a1c">
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>Background Shape</label>
+                  <select id="widget-bg-shape">
+                    <option value="none">None (Transparent)</option>
+                    <option value="pill" selected>Pill (Rounded)</option>
+                    <option value="rect">Rectangle</option>
+                  </select>
+                </div>
+                <button class="dialog-action primary" id="add-widget-btn">Add Widget</button>
               </div>
             </div>
           </div>
