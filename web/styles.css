@@ -1110,3 +1110,25 @@ input[type="range"]::-webkit-slider-thumb {
   color: var(--text-secondary);
   text-transform: uppercase;
 }
+
+/* Layer item styles for highlighting */
+.layer-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 6px;
+  transition: all 0.2s;
+}
+
+.layer-item.selected {
+  border-color: var(--accent);
+  background: rgba(145, 70, 255, 0.15);
+}
+
+.layer-item:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+}

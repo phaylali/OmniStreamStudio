@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OmniStream Studio</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Montserrat:wght@700&family=Oswald:wght@700&family=Pacifico&family=Roboto:wght@700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
     <style>
       #konva-container {
@@ -77,6 +78,7 @@
               <button class="dialog-tab active" data-type="image">Image</button>
               <button class="dialog-tab" data-type="html">HTML</button>
               <button class="dialog-tab" data-type="text">Text</button>
+              <button class="dialog-tab" data-type="widget">Widgets</button>
             </div>
             <div class="dialog-content">
               <!-- Image tab -->
@@ -125,6 +127,52 @@
                   <input type="color" id="text-color" value="#ffffff">
                 </div>
                 <button class="dialog-action primary" id="add-text-btn">Add Text</button>
+              </div>
+              <!-- Widget tab -->
+              <div class="dialog-panel" data-panel="widget">
+                <div class="form-group">
+                  <label>Widget Type</label>
+                  <select id="widget-type-select">
+                    <option value="clock">Digital Clock</option>
+                    <option value="countdown">Countdown Timer</option>
+                    <option value="twitch-viewers">Twitch Viewers Count</option>
+                    <option value="kick-viewers">Kick Viewers Count</option>
+                    <option value="alerts">Event Alerts (Follow/Sub)</option>
+                  </select>
+                </div>
+                <div class="form-group" id="widget-config-group" style="display:none;">
+                  <label id="widget-config-label">Minutes</label>
+                  <input type="number" id="widget-config-input" value="5">
+                </div>
+                <div class="form-group">
+                  <label>Font Family</label>
+                  <select id="widget-font">
+                    <option value="Inter">Inter</option>
+                    <option value="Roboto">Roboto</option>
+                    <option value="Montserrat">Montserrat</option>
+                    <option value="Oswald">Oswald</option>
+                    <option value="Pacifico">Pacifico</option>
+                  </select>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label>Text Color</label>
+                    <input type="color" id="widget-color" value="#00fa9a">
+                  </div>
+                  <div class="form-group">
+                    <label>Background</label>
+                    <input type="color" id="widget-bg-color" value="#1a1a1c">
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>Background Shape</label>
+                  <select id="widget-bg-shape">
+                    <option value="none">None (Transparent)</option>
+                    <option value="pill" selected>Pill (Rounded)</option>
+                    <option value="rect">Rectangle</option>
+                  </select>
+                </div>
+                <button class="dialog-action primary" id="add-widget-btn">Add Widget</button>
               </div>
             </div>
           </div>

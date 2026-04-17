@@ -139,25 +139,21 @@ function resizeCanvas() {
     return;
   }
   
-  let width = availableWidth;
-  let height = width / ASPECT_RATIO;
+  const scale = Math.min(availableWidth / STAGE_WIDTH, availableHeight / STAGE_HEIGHT);
   
-  if (height > availableHeight) {
-    height = availableHeight;
-    width = height * ASPECT_RATIO;
-  }
+  const width = STAGE_WIDTH * scale;
+  const height = STAGE_HEIGHT * scale;
   
   container.style.width = `${width}px`;
   container.style.height = `${height}px`;
   
-  console.log('Canvas resized:', width, 'x', height);
-  
   if (state.konvaStage) {
-    state.konvaStage.width(STAGE_WIDTH);
-    state.konvaStage.height(STAGE_HEIGHT);
+    state.konvaStage.width(width);
+    state.konvaStage.height(height);
+    state.konvaStage.scale({ x: scale, y: scale });
   }
   
-  console.log('Canvas resized:', width, 'x', height);
+  console.log('Canvas resized:', width, 'x', height, 'scale:', scale);
 }
 
 // --- Initialize Konva ---
@@ -188,6 +184,7 @@ function initKonva() {
   state.konvaStage.on('click tap', (e) => {
     if (e.target === state.konvaStage) {
       state.transformer.nodes([]);
+      renderLayersList();
     }
   });
   
@@ -299,6 +296,7 @@ function selectLayer(id: string) {
   if (layer && layer.konvaNode) {
     state.transformer.nodes([layer.konvaNode]);
     state.konvaLayer.batchDraw();
+    renderLayersList();
   }
 }
 
@@ -411,6 +409,72 @@ function addTextLayer(text: string, fontSize: number, color: string) {
   renderLayersList();
   updatePreview();
   console.log('Text layer added:', id);
+}
+
+// --- Native Widget Layer ---
+function addWidgetLayer(type: string, configVal: number, color: string, font: string, bgColor: string, bgShape: string) {
+  if (!state.konvaLayer) return;
+  
+  const id = Date.now().toString();
+  let initialText = 'Widget';
+  let fontSize = 48;
+  
+  if (type === 'clock') {
+    initialText = new Date().toLocaleTimeString();
+  } else if (type === 'countdown') {
+    initialText = `${configVal}:00`;
+    fontSize = 72;
+  } else if (type === 'twitch-viewers') {
+    initialText = 'Twitch: 0';
+  } else if (type === 'kick-viewers') {
+    initialText = 'Kick: 0';
+  } else if (type === 'alerts') {
+    initialText = 'Waiting for alerts...';
+  }
+  
+  const konvaLabel = new Konva.Label({
+    x: STAGE_WIDTH / 2,
+    y: STAGE_HEIGHT / 2,
+    draggable: true,
+  });
+  
+  if (bgShape !== 'none') {
+    konvaLabel.add(new Konva.Tag({
+      fill: bgColor,
+      cornerRadius: bgShape === 'pill' ? 30 : 0,
+      lineJoin: 'round',
+    }));
+  }
+  
+  const konvaText = new Konva.Text({
+    text: initialText,
+    fontSize: fontSize,
+    fontFamily: font + ', Inter, Arial, sans-serif',
+    fontStyle: 'bold',
+    fill: color,
+    padding: 20,
+  });
+  
+  konvaLabel.add(konvaText);
+  
+  konvaLabel.offsetX(konvaLabel.width() / 2);
+  konvaLabel.offsetY(konvaLabel.height() / 2);
+  
+  konvaLabel.on('click tap', () => selectLayer(id));
+  state.konvaLayer.add(konvaLabel);
+  
+  const layer = {
+    id,
+    type: `widget-${type}`,
+    konvaNode: konvaLabel,
+    active: true,
+    widgetConfig: { type, configVal, startTime: Date.now() },
+  };
+  
+  state.layers.push(layer);
+  selectLayer(id);
+  renderLayersList();
+  updatePreview();
 }
 
 // --- HTML Overlay Layer ---
@@ -573,15 +637,24 @@ function removeHtmlOverlayLayer(id: string) {
 function renderLayersList() {
   layersList.innerHTML = '';
   
+  const selectedNodes = state.transformer.nodes();
+  const selectedNode = selectedNodes.length > 0 ? selectedNodes[0] : null;
+  
   state.layers.forEach((layer, index) => {
     const div = document.createElement('div');
     div.className = 'layer-item';
+    if (selectedNode && layer.konvaNode === selectedNode) {
+      div.classList.add('selected');
+    }
     div.innerHTML = `
-      <span>${layer.type} #${index + 1}</span>
+      <span class="layer-name" style="cursor: pointer; flex: 1;">${layer.type} #${index + 1}</span>
       <button class="delete-btn" data-id="${layer.id}" title="Delete">
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
       </button>
     `;
+    div.querySelector('.layer-name')?.addEventListener('click', () => {
+      selectLayer(layer.id);
+    });
     div.querySelector('.delete-btn')?.addEventListener('click', () => {
       deleteLayer(layer.id);
     });
@@ -756,6 +829,39 @@ textInput?.addEventListener('keydown', (e) => {
   }
 });
 
+// Widgets tab
+const widgetTypeSelect = document.getElementById('widget-type-select') as HTMLSelectElement;
+const widgetConfigGroup = document.getElementById('widget-config-group') as HTMLDivElement;
+const widgetConfigInput = document.getElementById('widget-config-input') as HTMLInputElement;
+const widgetConfigLabel = document.getElementById('widget-config-label') as HTMLLabelElement;
+const widgetColor = document.getElementById('widget-color') as HTMLInputElement;
+const widgetBgColor = document.getElementById('widget-bg-color') as HTMLInputElement;
+const widgetFont = document.getElementById('widget-font') as HTMLSelectElement;
+const widgetBgShape = document.getElementById('widget-bg-shape') as HTMLSelectElement;
+const addWidgetBtn = document.getElementById('add-widget-btn') as HTMLButtonElement;
+
+widgetTypeSelect?.addEventListener('change', () => {
+  if (widgetTypeSelect.value === 'countdown') {
+    widgetConfigGroup.style.display = 'block';
+    widgetConfigLabel.textContent = 'Minutes';
+  } else {
+    widgetConfigGroup.style.display = 'none';
+  }
+});
+
+addWidgetBtn?.addEventListener('click', () => {
+  const type = widgetTypeSelect.value;
+  const configVal = parseFloat(widgetConfigInput.value) || 5;
+  const color = widgetColor.value;
+  const font = widgetFont.value;
+  const bgColor = widgetBgColor.value;
+  const bgShape = widgetBgShape.value;
+  
+  saveState();
+  addWidgetLayer(type, configVal, color, font, bgColor, bgShape);
+  closeDialog();
+});
+
 // HTML tab - File option
 selectHtmlBtn.addEventListener('click', () => htmlFileInput.click());
 htmlFileInput.addEventListener('change', (e) => {
@@ -811,12 +917,14 @@ async function startCapture() {
   
   try {
     // We need a unified canvas to record from, because Konva uses multiple canvases internally
-    const width = 1280;
-    const height = 720;
+    const is1080 = (document.getElementById('quality') as HTMLSelectElement)?.value.includes('1080') ?? true;
+    const width = is1080 ? 1920 : 1280;
+    const height = is1080 ? 1080 : 720;
+    
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = width;
     tempCanvas.height = height;
-    const tempCtx = tempCanvas.getContext('2d')!;
+    const tempCtx = tempCanvas.getContext('2d', { alpha: false })!;
     
     // Fill background so it's not transparent
     tempCtx.fillStyle = '#000000';
@@ -840,10 +948,10 @@ async function startCapture() {
       }
     }
     
-    console.log('Starting MediaRecorder with mimeType:', mimeType);
+    console.log('Starting MediaRecorder with mimeType:', mimeType, 'Resolution:', width, 'x', height);
     mediaRecorder = new MediaRecorder(canvasStream, {
       mimeType,
-      videoBitsPerSecond: 4000000 // 4 Mbps
+      videoBitsPerSecond: 4500000 // 4.5 Mbps
     });
     
     mediaRecorder.ondataavailable = (e) => {
@@ -860,19 +968,35 @@ async function startCapture() {
     streamReady = true;
     console.log('MediaRecorder capture started');
     
-    // Continuously draw Konva stage to the temp canvas
-    const captureFrame = () => {
+    // Continuously draw Konva stage to the temp canvas using requestAnimationFrame
+    let lastTime = performance.now();
+    const interval = 1000 / 30;
+    
+    const captureFrame = (currentTime: number) => {
       if (!streamReady || !state.konvaStage) return;
-      try {
-        // toCanvas() synchronously generates a composite of all Konva layers
-        const compositeCanvas = state.konvaStage.toCanvas();
-        tempCtx.drawImage(compositeCanvas, 0, 0, width, height);
-      } catch (e) {
-        console.error('Frame copy error:', e);
+      captureInterval = requestAnimationFrame(captureFrame);
+      
+      const delta = currentTime - lastTime;
+      if (delta > interval) {
+        lastTime = currentTime - (delta % interval);
+        try {
+          tempCtx.fillStyle = '#000000';
+          tempCtx.fillRect(0, 0, width, height);
+          
+          const konvaCanvas = state.konvaStage.content.querySelector('canvas');
+          if (konvaCanvas) {
+            tempCtx.drawImage(konvaCanvas, 0, 0, width, height);
+          } else {
+            const compositeCanvas = state.konvaStage.toCanvas({ pixelRatio: width / state.konvaStage.width() });
+            tempCtx.drawImage(compositeCanvas, 0, 0, width, height);
+          }
+        } catch (e) {
+          console.error('Frame copy error:', e);
+        }
       }
     };
     
-    captureInterval = window.setInterval(captureFrame, 1000 / 30);
+    captureInterval = requestAnimationFrame(captureFrame);
     
   } catch (e) {
     console.error('MediaRecorder failed:', e);
@@ -881,7 +1005,7 @@ async function startCapture() {
 
 function stopCapture() {
   if (captureInterval) {
-    clearInterval(captureInterval);
+    cancelAnimationFrame(captureInterval);
     captureInterval = null;
   }
   
@@ -931,9 +1055,39 @@ function handleOverlayEvent(event: any) {
   
   console.log('Overlay event:', type, data);
   
-  // Update all HTML overlays with the event
-  // The HTML can listen for 'overlay-event' custom event
-  // For now, just log - the HTML needs to set up listeners itself
+  let needsDraw = false;
+  
+  // Update native widgets
+  state.layers.forEach(layer => {
+    if (!layer.widgetConfig) return;
+    const wType = layer.widgetConfig.type;
+    const node = layer.konvaNode as Konva.Label;
+    const textNode = node.getText();
+    
+    if (wType === 'twitch-viewers' && type === 'twitch-viewers') {
+      textNode.text(`Twitch: ${data.count || 0}`);
+      needsDraw = true;
+    } else if (wType === 'kick-viewers' && type === 'kick-viewers') {
+      textNode.text(`Kick: ${data.count || 0}`);
+      needsDraw = true;
+    } else if (wType === 'alerts' && (type === 'follow' || type === 'sub')) {
+      textNode.text(`${data.user || 'Someone'} just ${type}ed!`);
+      needsDraw = true;
+      // Reset after 5 seconds
+      setTimeout(() => {
+        if (state.layers.includes(layer)) {
+          textNode.text('Waiting for alerts...');
+          state.konvaLayer.batchDraw();
+        }
+      }, 5000);
+    }
+  });
+  
+  if (needsDraw && state.konvaLayer) {
+    state.konvaLayer.batchDraw();
+  }
+  
+  // Update HTML overlays
   htmlOverlayLayers.forEach((overlay, id) => {
     updateHtmlOverlayData(id, { type, ...data });
   });
@@ -993,8 +1147,44 @@ stopBtn.addEventListener('click', () => {
 });
 
 // --- Preview Update Loop ---
+function updateTimeWidgets() {
+  const now = Date.now();
+  let needsDraw = false;
+  
+  state.layers.forEach(layer => {
+    if (!layer.widgetConfig) return;
+    const { type, configVal, startTime } = layer.widgetConfig;
+    const node = layer.konvaNode as Konva.Label;
+    const textNode = node.getText();
+    
+    if (type === 'clock') {
+      const newText = new Date().toLocaleTimeString();
+      if (textNode.text() !== newText) {
+        textNode.text(newText);
+        needsDraw = true;
+      }
+    } else if (type === 'countdown') {
+      const elapsed = now - startTime;
+      const totalMs = configVal * 60 * 1000;
+      const remainingMs = Math.max(0, totalMs - elapsed);
+      const mins = Math.floor(remainingMs / 60000);
+      const secs = Math.floor((remainingMs % 60000) / 1000);
+      const newText = `${mins}:${secs.toString().padStart(2, '0')}`;
+      if (textNode.text() !== newText) {
+        textNode.text(newText);
+        needsDraw = true;
+      }
+    }
+  });
+  
+  if (needsDraw && state.konvaLayer) {
+    state.konvaLayer.batchDraw();
+  }
+}
+
 function startPreviewLoop() {
   setInterval(() => {
+    updateTimeWidgets();
     updatePreview();
   }, 100); // 10 FPS preview update
 }

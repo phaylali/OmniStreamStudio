@@ -192,12 +192,15 @@ function startRTMPStream(config) {
   // We add anullsrc to generate a silent audio track, which Twitch requires to keep the connection open!
   const args = [
     '-y',
+    '-r', '30',                 // Force input to be read at 30 fps
     '-f', 'webm',               // Receive WebM from frontend
     '-i', 'pipe:0',             // Read from stdin
     '-f', 'lavfi',              // Generate silent audio
     '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100',
     '-c:v', 'libx264',          // Encode video to H.264
     '-preset', 'veryfast',
+    '-r', '30',                 // Force output to 30 fps
+    '-fps_mode', 'cfr',         // Force constant frame rate
     '-b:v', config.bitrate || '4500k',
     '-maxrate', config.bitrate || '4500k',
     '-bufsize', '9000k',
