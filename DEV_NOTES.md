@@ -1,175 +1,105 @@
 # OmniStream Studio - Developer Notes
 
-## Project Overview
-
-Professional GPU-accelerated streaming encoder with multi-layer compositing for Twitch and Kick.
-
-## Architecture
+## Current Architecture (Web Version)
 
 ### Tech Stack
 
-- **Framework**: Tauri 2.x (Rust backend + WebView2)
-- **UI**: Vanilla TypeScript + CSS
-- **Encoder**: FFmpeg (VAAPI/NVENC/QSV/x264)
-- **Streaming**: RTMP via FFmpeg tee muxer
+- **Frontend**: Konva.js + TypeScript + Vite
+- **Encoding**: MediaRecorder API (WebM natively in the browser)
+- **Server**: Node.js (WebSocket to ingest WebM blobs)
+- **Muxing/Streaming**: FFmpeg subprocess (generates audio, multiplexes to FLV, relays via `tee` muxer)
 
-### Core Components
-
-1. **Frontend (`main.ts`)** - UI, layer management, Tauri IPC
-2. **Backend (`lib.rs`)** - FFmpeg process, device enumeration, stats
-3. **Status Script (`status.ts`)** - Bun-based channel status checker
-4. **Capabilities (`default.json`)** - Tauri window permissions
-
-## Layer System
-
-| Type | Capture Method | Features |
-|------|---------------|----------|
-| Monitor | x11grab | Geometry detection, X/Y offset |
-| Camera | video4linux2 | V4L2 devices |
-| Image | file input | Looping, scale |
-| Video | file input | Loop, volume control, play/pause |
-| Mic | pulseaudio | Device selection + volume |
-| Music | file input | Auto-loop, volume |
-| Placeholder | lavfi color | Color block |
-
-## Video Pipeline
-
-### Filter Graph Construction
+### Current Pipeline
 
 ```
-lavfi color=black (background)
-    ↓ overlay ↓
-x11grab (monitor) → scale → overlay → ...
-    ↓
-video4linux2 (camera) → scale → overlay → ...
-    ↓
-[inputs] → amix (audio mixing)
-    ↓
-VAAPI hwupload (if GPU encoding)
-    ↓
-FFmpeg encoding → RTMP output
+Browser                                    Server                   
+┌───────────┐   ┌─────────────┐   ┌────────┐   ┌───────────┐  RTMP   ┌────────┐
+│ Konva.js  │──▶│MediaRecorder│──▶│WebSocket│──▶│ FFmpeg   │───────▶│ Twitch │
+│  Canvas  │   │   (WebM)    │   │ Binary │   │ (libx264) │───────▶│  Kick  │
+└───────────┘   └─────────────┘   └────────┘   └───────────┘        └────────┘
 ```
 
-### Quality Presets
+## Solved Problems
 
-| Preset | Resolution | FPS | Bitrate |
-|--------|-----------|-----|--------|
-| 720p30 | 1280x720 | 30 | 3000k |
-| 1080p30 | 1920x1080 | 30 | 4500k |
-| 1080p60 | 1920x1080 | 60 | 6000k |
+1. **RTMP Handshake / Twitch Drop**: Twitch abruptly disconnected our pure Node.js RTMP stream because Twitch ingest servers implicitly require an audio track and strict FLV timing. FFmpeg solves this natively by generating a silent `anullsrc` track and handling the FLV muxing precisely.
+2. **Kick TLS/Endpoint Errors**: Kick uses `rtmps://` over 443 and requires the stream destination to include the `/app` endpoint before the stream key. This has been corrected in the FFmpeg `tee` string, with `onfail=ignore` added to prevent one failing platform from crashing the whole broadcast.
+3. **MediaRecorder Stalling**: `konvaStage.toCanvas()` returns a static, detached canvas. Capturing a stream from it resulted in 1 frame and caused FFmpeg to wait indefinitely (`Starting FFmpeg...` hang). We resolved this by restoring a 30fps `captureInterval` loop that continuously composites the Konva stage onto a persistent offscreen `tempCanvas`.
 
-### Encoder Priority
+## Current Problem (To Be Fixed Next Session)
 
-1. **VAAPI** (`h264_vaapi`) - AMD/Intel GPUs
-2. **NVENC** (`h264_nvenc`) - NVIDIA GPUs
-3. **Software** (`libx264`) - CPU fallback
+### Problem 1: Frame Duplication / VFR Bitrate Starvation / Visual Lag
+**Symptoms**:
+- FFmpeg logs indicate it is interpreting the input as `1k fps, 1k tbn` (1000 frames per second).
+- FFmpeg outputs `More than 1000 frames duplicated` continuously.
+- The stream has visual lag, unstable bitrate, and "ghosting" or traces when moving images.
+- Moving elements on the canvas causes high compression artifacts.
 
-## Preview Pipeline
+**Root Cause**: 
+`MediaRecorder` on Chrome/WebM outputs a Variable Frame Rate (VFR) container by default, or the 30fps `tempCanvas.captureStream(30)` has inconsistent timestamps. FFmpeg sees the WebM timestamps, gets confused, and tries to encode at 1000 FPS to compensate. Since we constrained the bitrate to `4500k` (`-b:v 4500k`), FFmpeg violently starves the video quality to encode 1000 frames every second, leaving no bits for motion (causing the "traces").
 
-- FFmpeg output via `image2pipe` (MJPEG)
-- Raw stdout captured in Rust
-- JPEG frames extracted and base64 encoded
-- Emitted via Tauri events to frontend Canvas
+**Proposed Fix**:
+In `server.cjs`, we must strictly force a Constant Frame Rate (CFR) in FFmpeg:
+1. Add `-r 30` before `-i pipe:0` to force FFmpeg to read the pipe at 30 fps.
+2. Add `-r 30` after `-i pipe:0` to force output at 30 fps.
+3. Add `-vsync cfr` or `-fps_mode cfr` to explicitly prevent FFmpeg from attempting to interpolate to 1000 fps.
 
-## System Stats
+## File Structure
 
-- **CPU**: `ps` command on app/ffmpeg PIDs
-- **GPU**: `/sys/class/drm/card*/device/hwmon/*/gpu_busy_percent`
-- **VRAM**: `/sys/class/drm/card*/device/mem_info_vram_used`
-
-## Window Controls
-
-The app uses a custom title bar with decorations disabled. Window controls are implemented via Tauri window APIs:
-
-```typescript
-appWindow.minimize();
-appWindow.maximize();
-appWindow.unmaximize();
-appWindow.close();
-appWindow.isMaximized();
-appWindow.startDragging();
+```
+OmniStreamStudio/
+├── server.cjs          # WebSocket ingest -> FFmpeg pipeline
+├── check_status.ts     # CLI tool to check Twitch/Kick live status
+├── web/
+│   ├── main.ts     # Frontend with Konva and MediaRecorder
+│   ├── index.html
+│   └── styles.css
+├── .env            # Stream keys
+├── package.json
+└── README.md
 ```
 
-Required permissions in `capabilities/default.json`:
-- `core:window:allow-minimize`
-- `core:window:allow-maximize`
-- `core:window:allow-unmaximize`
-- `core:window:allow-close`
-- `core:window:allow-is-maximized`
-- `core:window:allow-start-dragging`
-
-## Recent Fixes
-
-1. **Window Controls** (2026-04-14)
-   - Added required window permissions in `capabilities/default.json`
-   - Fixed CSS pointer-events on window controls
-   - Now working: minimize, maximize, close
-
-2. **Layers Panel Scrolling** (2026-04-14)
-   - Added `min-height: 0` to sidebar and layers list
-   - Fixed overflow handling for long layer lists
-
-3. **Video Control Buttons** (2026-04-14)
-   - Changed from full width to auto-sizing
-   - Added `flex: 0 1 auto` and `min-width: 36px`
-   - Larger icons (14px) with hover effects
-   - Fixed layout to display in a row
-
-4. **FFmpeg Pipeline** (2026-04-14)
-   - Fixed camera and video source conflict
-   - Proper input linking format in filter graph
-   - All layer types now use consistent filter syntax
-
-5. **UI Improvements** (2026-04-14)
-   - Aspect ratio lock fixed for bidirectional sync
-   - Layer card styling improved with better spacing
-   - Dropdown menus have custom arrow indicators
-   - Better visual hierarchy and organization
-
-6. **Performance Optimizations** (2026-04-14)
-   - Preview: Reduced framerate to 10fps, threads=2, ultrafast preset
-   - Stream: Added -preset ultrafast -tune zerolatency
-   - Video files: Added -re flag for native framerate reading
-   - Thread limiting to prevent CPU overload
-   - Non-VAAPI path optimized with copy instead of extra processing
-
-8. **gpu-screen-recorder Integration** (2026-04-14)
-   - Auto-detects if gpu-screen-recorder is installed
-   - Uses named pipe (FIFO) to connect GPU capture to FFmpeg
-   - Falls back to x11grab if not available
-   - Monitor names resolved from `--list-monitors` output
-   - Note: When streaming with camera, preview camera will fail (device busy) - this is expected
-
-9. **Layer Reordering** (2026-04-14)
-   - Fixed: layer order changes now properly restart stream when live
-   - Previously only restarted preview, not stream
-
-## Known Limitations
-
-1. **Monitor/Camera Lag**: x11grab has inherent limitations. Alternatives being researched:
-   - **kmsgrab**: DRM-based capture, requires CAP_SYS_ADMIN
-   - **gpu-screen-recorder**: GPU-accelerated, lowest CPU impact (AMD/Intel/NVIDIA)
-   - **OBS Studio**: Uses different capture methods that avoid x11grab issues
-2. **Kick Streaming**: Dual platform muxing may have issues
-3. **Monitor Geometry**: Offset monitors require precise xrandr parsing
-4. **Wayland**: PipeWire capture not yet implemented
-
-## Commands
+## Running
 
 ```bash
-./run.sh dev      # Development mode
-./debug.sh vaapi  # VAAPI diagnostics
-./debug.sh check  # System check
+# Terminal 1 - Start backend
+node server.cjs
+
+# Terminal 2 - Start frontend
+bun run dev
+
+# Terminal 3 - Check Stream Status
+bun check_status.ts
 ```
 
-## Data Storage
+Open http://localhost:6969, click GO LIVE.
 
-- `.env` - Stream keys and credentials
-- `tauri.conf.json` - App configuration
-- `src-tauri/capabilities/default.json` - Window permissions
+## Old Tauri Version
+
+The original Tauri-based version used FFmpeg for encoding. See git history for:
+- `src-tauri/` - Rust backend
+- GPU capture via gpu-screen-recorder
+- FFmpeg tee for dual streaming
+
+## License
+
+MIT License
+
+## Support Us
+
+<p align="center">
+  <a href="https://ko-fi.com/omniversify">
+    <img src="https://raw.githubusercontent.com/phaylali/Omniversify/main/public/images/kofi_logo.svg" width="200" alt="Ko-Fi" />
+  </a>
+</p>
+
+<p align="center">
+  <strong>Keep us going</strong>
+</p>
 
 ---
 
 &copy; 2026 [Omniversify](https://omniversify.com). All rights reserved.
 
 _Made by Moroccans, for the Omniverse_
+
+[![ReadMeSupportPalestine](https://raw.githubusercontent.com/Safouene1/support-palestine-banner/master/banner-project.svg)](https://donate.unrwa.org/-landing-page/en_EN)

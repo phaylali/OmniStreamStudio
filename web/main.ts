@@ -1,5 +1,6 @@
 import Konva from 'konva';
 import html2canvas from 'html2canvas';
+import { Output, Mp4OutputFormat, CanvasSource, StreamTarget, VideoEncodingConfig } from 'mediabunny';
 
 console.log('main.ts loaded');
 
@@ -797,162 +798,85 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// --- WebCodecs Stream Capture ---
-let encoder: VideoEncoder | null = null;
-let muxer: any = null;
+// --- Mediabunny Stream Capture ---
+let mediaOutput: Output | null = null;
 let captureInterval: number | null = null;
 let frameCount = 0;
+let streamReady = false;
 
-// Check if WebCodecs is available
-function webCodecsSupported(): boolean {
-  return typeof VideoEncoder !== 'undefined' && 
-         VideoEncoder.isConfigSupported !== undefined;
-}
+let mediaRecorder: MediaRecorder | null = null;
 
 async function startCapture() {
   if (!state.konvaStage) return;
   
-  console.log('WebCodecs supported:', webCodecsSupported());
-  
-  if (!webCodecsSupported()) {
-    console.log('WebCodecs not supported, using fallback');
-    startCaptureFallback();
-    return;
-  }
-  
   try {
-    const canvas = state.konvaStage.toCanvas();
-    console.log('Canvas:', canvas.width, 'x', canvas.height);
-    
-    // VideoEncoder config - H.264 (use 720p to fit AVC level 3.0)
+    // We need a unified canvas to record from, because Konva uses multiple canvases internally
     const width = 1280;
     const height = 720;
-    const encoderConfig: VideoEncoderConfig = {
-      codec: 'avc1.42001F',  // H.264 main profile level 3.1
-      width,
-      height,
-      bitrate: 4000000,
-      framerate: 30,
-    };
-    
-    // Check codec support
-    if (!VideoEncoder.isConfigSupported(encoderConfig)) {
-      encoderConfig.codec = 'avc1.42001F';  // Try main profile
-    }
-    if (!VideoEncoder.isConfigSupported(encoderConfig)) {
-      console.log('H.264 not supported, trying VP9');
-      encoderConfig.codec = 'vp09.00.10.08';  // VP9
-    }
-    
-    console.log('Using codec:', encoderConfig.codec);
-    console.log('Codec supported:', VideoEncoder.isConfigSupported(encoderConfig));
-    
-    if (!VideoEncoder.isConfigSupported(encoderConfig)) {
-      throw new Error('No supported codec found');
-    }
-    
-    // Create encoder
-    encoder = new VideoEncoder({
-      output: (chunk: EncodedVideoChunk, metadata: any) => {
-        // Get chunk data
-        const chunkData = new Uint8Array(chunk.byteLength);
-        chunk.copyTo(chunkData);
-        
-        // Send encoded chunk with metadata
-        const msg = {
-          type: 'video_chunk',
-          data: Array.from(chunkData),
-          timestamp: chunk.timestamp,
-          duration: chunk.duration,
-          isKeyFrame: chunk.type === 'key',
-          codec: encoderConfig.codec
-        };
-        
-        if (state.ws?.readyState === WebSocket.OPEN) {
-          state.ws.send(JSON.stringify(msg));
-          frameCount++;
-          if (frameCount % 30 === 0) {
-            console.log('Sent encoded frame', frameCount, 'size:', chunkData.length, 'key:', chunk.type === 'key');
-          }
-        }
-      },
-      error: (e: Error) => {
-        console.error('Encoder error:', e);
-      }
-    });
-    
-    encoder.configure(encoderConfig);
-    console.log('VideoEncoder configured');
-    
-    // Capture loop
-    let timestamp = 0;
-    const frameDuration = 33333;  // 30fps in microseconds
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = width;
     tempCanvas.height = height;
     const tempCtx = tempCanvas.getContext('2d')!;
     
-    const captureFrame = () => {
-      if (!encoder || encoder.state === 'closed') return;
-      try {
-        state.konvaStage!.draw();
-        const c = state.konvaStage!.toCanvas();
-        tempCtx.drawImage(c, 0, 0, width, height);
-        const frame = new VideoFrame(tempCanvas, { timestamp });
-        encoder.encode(frame, { keyFrame: true });
-        frame.close();
-        timestamp += frameDuration;
-      } catch (e) {
-        console.error('Frame error:', e);
+    // Fill background so it's not transparent
+    tempCtx.fillStyle = '#000000';
+    tempCtx.fillRect(0, 0, width, height);
+    
+    // Capture stream from the temp canvas at 30 FPS
+    const canvasStream = tempCanvas.captureStream(30);
+    
+    // Try to find the best supported MIME type
+    let mimeType = '';
+    const types = [
+      'video/webm;codecs=h264',
+      'video/webm;codecs=vp9',
+      'video/webm;codecs=vp8',
+      'video/webm'
+    ];
+    for (const type of types) {
+      if (MediaRecorder.isTypeSupported(type)) {
+        mimeType = type;
+        break;
+      }
+    }
+    
+    console.log('Starting MediaRecorder with mimeType:', mimeType);
+    mediaRecorder = new MediaRecorder(canvasStream, {
+      mimeType,
+      videoBitsPerSecond: 4000000 // 4 Mbps
+    });
+    
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0 && state.ws?.readyState === WebSocket.OPEN) {
+        // Send WebM blob directly to Node.js server
+        e.data.arrayBuffer().then(buffer => {
+          state.ws?.send(new Uint8Array(buffer));
+        });
       }
     };
     
-    // Start capturing at 30fps
-    captureInterval = window.setInterval(captureFrame, 33);
-    console.log('WebCodecs capture started');
+    // Request data every 1000ms
+    mediaRecorder.start(1000);
+    streamReady = true;
+    console.log('MediaRecorder capture started');
+    
+    // Continuously draw Konva stage to the temp canvas
+    const captureFrame = () => {
+      if (!streamReady || !state.konvaStage) return;
+      try {
+        // toCanvas() synchronously generates a composite of all Konva layers
+        const compositeCanvas = state.konvaStage.toCanvas();
+        tempCtx.drawImage(compositeCanvas, 0, 0, width, height);
+      } catch (e) {
+        console.error('Frame copy error:', e);
+      }
+    };
+    
+    captureInterval = window.setInterval(captureFrame, 1000 / 30);
     
   } catch (e) {
-    console.error('WebCodecs failed:', e);
-    console.log('Falling back to JPEG');
-    startCaptureFallback();
+    console.error('MediaRecorder failed:', e);
   }
-}
-
-function startCaptureFallback() {
-  const width = 1280;
-  const height = 720;
-  const tempCanvas = document.createElement('canvas');
-  tempCanvas.width = width;
-  tempCanvas.height = height;
-  const tempCtx = tempCanvas.getContext('2d')!;
-  
-  const captureFrames = () => {
-    if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
-    
-    state.konvaStage!.draw();
-    const c = state.konvaStage!.toCanvas();
-    tempCtx.drawImage(c, 0, 0, width, height);
-    const dataUrl = tempCanvas.toDataURL('image/jpeg', 0.7);
-    
-    if (dataUrl.length > 1000) {
-      const base64 = dataUrl.split(',')[1];
-      const binary = atob(base64);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) {
-        bytes[i] = binary.charCodeAt(i);
-      }
-      
-      state.ws.send(bytes);
-      frameCount++;
-      
-      if (frameCount % 30 === 0) {
-        console.log('Sent frame', frameCount, 'size:', bytes.length);
-      }
-    }
-  };
-  
-  captureInterval = window.setInterval(captureFrames, 66);
-  console.log('Fallback capture started');
 }
 
 function stopCapture() {
@@ -961,21 +885,13 @@ function stopCapture() {
     captureInterval = null;
   }
   
-  // Stop encoder
-  if (encoder) {
-    encoder.flush();
-    encoder.close();
-    encoder = null;
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+    mediaRecorder = null;
   }
   
-  // Stop muxer
-  if (muxer) {
-    muxer.finalize();
-    muxer = null;
-  }
-  
-  console.log('Capture stopped, frames sent:', frameCount);
-  frameCount = 0;
+  streamReady = false;
+  console.log('Capture stopped');
 }
 
 // --- WebSocket Connection ---
