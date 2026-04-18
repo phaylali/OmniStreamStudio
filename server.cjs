@@ -1,243 +1,240 @@
 const { WebSocketServer } = require('ws');
 const http = require('http');
 const https = require('https');
-const net = require('net');
 const fs = require('fs');
-const tls = require('tls');
+const path = require('path');
+const { spawn } = require('child_process');
 
-const WS_PORT = 6970;
-const HTTP_PORT = 6971;
-const EVENTS_PORT = 6972;
+// =======================
+// JSON File Database
+// =======================
+const JSON_PATH = path.join(__dirname, 'omnistream.json');
 
-function loadEnv() {
+let data = {
+  scenes: [],
+  settings: { platforms: [], resolution: '1080p30', twitchIngest: '', kickIngest: '' }
+};
+
+function loadData() {
   try {
-    const envPath = __dirname + '/.env';
-    if (fs.existsSync(envPath)) {
-      const envContent = fs.readFileSync(envPath, 'utf8');
-      envContent.split('\n').forEach(line => {
-        line = line.trim();
-        if (line && !line.startsWith('#')) {
-          const [key, ...valueParts] = line.split('=');
-          if (key && valueParts.length) {
-            process.env[key.trim()] = valueParts.join('=').trim();
-          }
+    if (fs.existsSync(JSON_PATH)) {
+      data = JSON.parse(fs.readFileSync(JSON_PATH, 'utf-8'));
+      console.log('JSON data loaded:', JSON_PATH);
+    } else {
+      saveData();
+    }
+  } catch (e) {
+    console.log('Error loading:', e.message);
+    saveData();
+  }
+}
+
+function saveData() {
+  fs.writeFileSync(JSON_PATH, JSON.stringify(data, null, 2));
+}
+
+loadData();
+
+// =======================
+// WebSocket Server
+// =======================
+const wss = new WebSocketServer({ port: 6970 });
+let clients = [];
+let ffmpegProc = null;
+let streamConfig = null;
+
+wss.on('connection', (ws) => {
+  clients.push(ws);
+  console.log('Client connected');
+  
+  ws.on('message', (message) => {
+    try {
+      const msg = JSON.parse(message.toString());
+      
+      // Check if it's a stream config (not DB message)
+      if (msg.twitchKey || msg.kickUrl) {
+        startFFmpeg(ws, msg);
+        return;
+      }
+      
+      // DB messages
+      handleDbMessage(ws, msg);
+    } catch (e) {
+      // Binary stream data - forward to FFmpeg
+      if (ffmpegProc && ffmpegProc.stdin) {
+        ffmpegProc.stdin.write(message);
+      }
+    }
+  });
+  
+  ws.on('close', () => {
+    clients = clients.filter(c => c !== ws);
+    if (ffmpegProc) {
+      ffmpegProc.kill();
+      ffmpegProc = null;
+    }
+  });
+});
+
+function handleDbMessage(ws, msg) {
+  const { type, data: msgData, id } = msg;
+  
+  switch (type) {
+    case 'db_load_scenes':
+      ws.send(JSON.stringify({ type: 'scenes_loaded', data: data.scenes }));
+      break;
+      
+    case 'db_save_scene':
+      const { id: sceneId, name, layers } = msgData;
+      const idx = data.scenes.findIndex(s => s.id === sceneId);
+      const sceneData = { id: sceneId, name, layers, updated_at: Date.now() };
+      if (idx >= 0) data.scenes[idx] = sceneData;
+      else data.scenes.push(sceneData);
+      saveData();
+      ws.send(JSON.stringify({ type: 'scene_saved', id: sceneId }));
+      console.log('Scene saved:', name, layers?.length || 0, 'layers');
+      break;
+      
+    case 'db_delete_scene':
+      data.scenes = data.scenes.filter(s => s.id !== id);
+      saveData();
+      ws.send(JSON.stringify({ type: 'scene_deleted', id }));
+      break;
+      
+    case 'db_load_settings':
+      ws.send(JSON.stringify({ type: 'settings_loaded', data: data.settings }));
+      break;
+      
+    case 'db_save_settings':
+      data.settings = { ...data.settings, ...msgData };
+      saveData();
+      ws.send(JSON.stringify({ type: 'settings_saved' }));
+      console.log('Settings saved');
+      break;
+      
+    default:
+      // Broadcast to other clients
+      clients.forEach(c => {
+        if (c !== ws && c.readyState === 1) {
+          c.send(JSON.stringify(msg));
         }
       });
-    }
-  } catch (e) {}
+  }
 }
-loadEnv();
 
-const server = http.createServer((req, res) => {
+function startFFmpeg(ws, config) {
+  streamConfig = config;
+  console.log('Starting FFmpeg with config:', config);
+  
+  const bitrate = config.bitrate || '4500k';
+  const codec = config.codec || 'libx264';
+  
+  const args = [
+    '-i', '-',
+    '-c:v', codec,
+    '-b:v', bitrate,
+    '-g', '60',
+    '-keyint_min', '60',
+    '-c:a', 'aac',
+    '-b:a', '128k',
+    '-f', 'flv'
+  ];
+  
+  if (config.twitchKey) {
+    args.push('rtmp://live.twitch.tv/app/' + config.twitchKey);
+  } else if (config.kickUrl) {
+    args.push(config.kickUrl);
+  }
+  
+  console.log('FFmpeg args:', args);
+  
+  ffmpegProc = spawn('ffmpeg', args);
+  
+  ffmpegProc.stderr.on('data', (d) => console.log('FFmpeg:', d.toString().substr(0, 100)));
+  ffmpegProc.on('close', () => {
+    console.log('FFmpeg ended');
+    ffmpegProc = null;
+  });
+  
+  ws.send(JSON.stringify({ type: 'streaming_started' }));
+}
+
+// =======================
+// HTTP Server
+// =======================
+const HTTP_PORT = 6971;
+
+const httpServer = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Origin, Content-Type');
-   
-  if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
-    
-  if (req.url?.startsWith('/local?')) {
-    const filePath = new URL(req.url, `http://localhost:${HTTP_PORT}`).searchParams.get('path');
-    if (filePath) {
-      const fs = require('fs');
-      const path = require('path');
-      const baseDir = path.join(__dirname, 'web');
-      const fullPath = path.join(baseDir, filePath);
-      if (!fullPath.startsWith(baseDir)) { res.writeHead(403); res.end('Forbidden'); return; }
-      if (fs.existsSync(fullPath)) {
-        const content = fs.readFileSync(fullPath);
-        const ext = path.extname(fullPath).toLowerCase();
-        const contentType = {
-          '.html': 'text/html', '.htm': 'text/html', '.css': 'text/css',
-          '.js': 'application/javascript', '.png': 'image/png',
-          '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
-          '.svg': 'image/svg+xml',
-        }[ext] || 'application/octet-stream';
-        res.setHeader('Content-Type', contentType);
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.writeHead(200);
-        res.write(content);
-        res.end();
-      } else { res.writeHead(404); res.end('Not found'); }
-      return;
-    }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
   }
-   
-  if (req.url?.startsWith('/proxy?')) {
-    const urlParam = new URL(req.url, `http://localhost:${HTTP_PORT}`).searchParams.get('url');
-    if (urlParam) {
-      let targetUrl = urlParam;
-      if (!urlParam.startsWith('http://') && !urlParam.startsWith('https://')) {
-        targetUrl = 'http://' + urlParam;
-      }
-      let parsedUrl;
-      try { parsedUrl = new URL(targetUrl); }
-      catch (e) { res.writeHead(400); res.end('Invalid URL'); return; }
-      const proxyLib = parsedUrl.protocol === 'https:' ? https : http;
-      const proxyReq = proxyLib.request({
-        hostname: parsedUrl.hostname,
-        port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
-        path: parsedUrl.pathname + parsedUrl.search,
-        method: 'GET',
-      }, (proxyRes) => {
-        res.setHeader('Content-Type', proxyRes.headers['content-type'] || 'text/html');
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.writeHead(proxyRes.statusCode || 200);
-        proxyRes.pipe(res);
-      });
-      proxyReq.on('error', () => { res.writeHead(502); res.end('Proxy error'); });
-      proxyReq.end();
-      return;
-    }
+  
+  // Proxy
+  if (req.url.startsWith('/proxy?url=')) {
+    const url = decodeURIComponent(req.url.split('url=')[1]);
+    https.get(url, (proxyRes) => {
+      res.writeHead(proxyRes.statusCode, proxyRes.headers);
+      proxyRes.pipe(res);
+    }).on('error', () => {
+      res.writeHead(500);
+      res.end('Proxy error');
+    });
+    return;
   }
+  
+  // Local file serving
+  let filePath = path.join(__dirname, 'web', req.url === '/' ? 'index.html' : req.url);
+  if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+    const ext = path.extname(filePath);
+    const contentTypes = { '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg' };
+    res.writeHead(200, { 'Content-Type': contentTypes[ext] || 'text/plain' });
+    res.end(fs.readFileSync(filePath));
+    return;
+  }
+  
   res.writeHead(404);
   res.end('Not found');
 });
 
-server.listen(HTTP_PORT, () => { console.log(`HTTP server on port ${HTTP_PORT}`); });
+httpServer.listen(HTTP_PORT, () => {
+  console.log('HTTP server on port', HTTP_PORT);
+});
 
-const wss = new WebSocketServer({ port: WS_PORT });
-console.log(`WebSocket server on port ${WS_PORT}`);
-
-const { spawn } = require('child_process');
-
-let ffmpegProcess = null;
-let streamActive = false;
-
-wss.on('connection', (ws) => {
-  console.log('Client connected to stream');
-  let binaryChunkCount = 0;
-   
-  ws.on('message', (message, isBinary) => {
-    // If it's binary data, pipe it to FFmpeg
-    if (isBinary) {
-      binaryChunkCount++;
-      if (binaryChunkCount % 30 === 0) {
-        console.log(`Received ${binaryChunkCount} binary chunks from browser...`);
-      }
-      if (ffmpegProcess && ffmpegProcess.stdin.writable) {
-        ffmpegProcess.stdin.write(message);
-      }
-      return;
-    }
+// =======================
+// Events Server (for overlays)
+// =======================
+const EVENTS_PORT = 6972;
+const eventsServer = http.createServer((req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  
+  if (req.url === '/events') {
+    res.write('retry: 5000\n\n');
     
-    // Otherwise it's config string
-    if (!streamActive) {
-      try {
-        const config = JSON.parse(message.toString());
-        console.log('Starting stream with config:', config);
-        startRTMPStream(config);
-        streamActive = true;
-      } catch (e) {}
-    }
-  });
-   
-  ws.on('close', () => {
-    console.log('Client disconnected');
-    stopRTMPStream();
-    streamActive = false;
-  });
-});
-
-const eventServer = net.createServer((socket) => {
-  console.log('Event client connected');
-  socket.on('data', (data) => {
-    const messages = data.toString().split('\n').filter(m => m.trim());
-    messages.forEach(msg => {
-      try {
-        const event = JSON.parse(msg);
-        console.log('Event received:', event.type, event.data);
-        wss.clients.forEach(client => {
-          if (client.readyState === 1) {
-            client.send(JSON.stringify({ type: 'event', data: event }));
-          }
-        });
-      } catch (e) {}
+    const onEvent = (event, data) => {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+    
+    req.on('close', () => {
+      console.log('Events client disconnected');
     });
-  });
-  socket.on('close', () => { console.log('Event client disconnected'); });
+    return;
+  }
+  
+  res.writeHead(404);
+  res.end();
 });
 
-eventServer.listen(EVENTS_PORT, () => { console.log(`Events server on port ${EVENTS_PORT}`); });
+eventsServer.listen(EVENTS_PORT, () => {
+  console.log('Events server on port', EVENTS_PORT);
+});
 
-function startRTMPStream(config) {
-  if (ffmpegProcess) {
-    console.log('Stream already active');
-    return;
-  }
-
-  const twitchKey = (config.twitchKey && config.twitchKey !== 'using_env') ? config.twitchKey : process.env.TWITCH_KEY;
-  const kickStreamUrl = (config.kickUrl && config.kickUrl !== 'using_env') ? config.kickUrl : process.env.KICK_STREAM_URL;
-  const kickKey = (config.kickUrl && config.kickUrl !== 'using_env') ? config.kickUrl : process.env.KICK_KEY;
-  
-  let outputs = [];
-  if (twitchKey) {
-    outputs.push(`[f=flv:onfail=ignore]rtmp://live.twitch.tv/app/${twitchKey}`);
-  }
-  
-  if (kickStreamUrl && kickKey) {
-    let kickUrl = kickStreamUrl.replace(/\/+$/, '');
-    if (!kickUrl.endsWith('/app')) {
-      kickUrl += '/app';
-    }
-    outputs.push(`[f=flv:onfail=ignore]${kickUrl}/${kickKey}`);
-  }
-  
-  if (outputs.length === 0) {
-    console.log('No outputs configured');
-    return;
-  }
-
-  const teeOutputs = outputs.join('|');
-
-  // We add anullsrc to generate a silent audio track, which Twitch requires to keep the connection open!
-  const args = [
-    '-y',
-    '-r', '30',                 // Force input to be read at 30 fps
-    '-f', 'webm',               // Receive WebM from frontend
-    '-i', 'pipe:0',             // Read from stdin
-    '-f', 'lavfi',              // Generate silent audio
-    '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100',
-    '-c:v', 'libx264',          // Encode video to H.264
-    '-preset', 'veryfast',
-    '-r', '30',                 // Force output to 30 fps
-    '-fps_mode', 'cfr',         // Force constant frame rate
-    '-b:v', config.bitrate || '4500k',
-    '-maxrate', config.bitrate || '4500k',
-    '-bufsize', '9000k',
-    '-pix_fmt', 'yuv420p',
-    '-g', '60',                 // Keyframe interval
-    '-c:a', 'aac',              // Encode audio to AAC
-    '-b:a', '128k',
-    '-map', '0:v',              // Map video from pipe
-    '-map', '1:a',              // Map audio from lavfi
-    '-f', 'tee',                // Mux to multiple outputs
-    teeOutputs
-  ];
-
-  console.log('Starting FFmpeg...');
-  ffmpegProcess = spawn('ffmpeg', args);
-  
-  ffmpegProcess.stderr.on('data', (data) => {
-    const str = data.toString().trim();
-    // Ignore harmless warnings about pipe:0 to avoid spam, but print everything else
-    if (str && !str.includes('frame=') && !str.includes('size=')) {
-      console.log('FFmpeg:', str);
-    }
-  });
-
-  ffmpegProcess.on('close', (code) => {
-    console.log(`FFmpeg exited with code ${code}`);
-    ffmpegProcess = null;
-  });
-}
-
-function stopRTMPStream() {
-  if (ffmpegProcess) {
-    console.log('Stopping FFmpeg stream...');
-    ffmpegProcess.stdin.end();
-    ffmpegProcess.kill('SIGINT');
-    ffmpegProcess = null;
-  }
-}
-
-console.log(`Server ready`);
+console.log('Server ready, JSON:', JSON_PATH);

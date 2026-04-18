@@ -5,9 +5,16 @@
 ### Tech Stack
 
 - **Frontend**: Konva.js + TypeScript + Vite
-- **Encoding**: MediaRecorder API (WebM natively in the browser)
-- **Server**: Node.js (WebSocket to ingest WebM blobs)
-- **Muxing/Streaming**: FFmpeg subprocess (generates audio, multiplexes to FLV, relays via `tee` muxer)
+- **Storage**: JSON file (omnistream.json)
+- **Encoding**: MediaRecorder API (WebM natively in browser)
+- **Server**: Node.js WebSocket server (port 6970)
+- **Streaming**: FFmpeg subprocess (relays RTMP to Twitch/Kick)
+
+### Server Ports
+
+- `6970` - WebSocket server (ingest + DB sync)
+- `6971` - HTTP server (proxy + file serving)
+- `6972` - Events server (SSE for overlays)
 
 ### Current Pipeline
 
@@ -17,43 +24,67 @@ Browser                                    Server
 │ Konva.js  │──▶│MediaRecorder│──▶│WebSocket│──▶│ FFmpeg   │───────▶│ Twitch │
 │  Canvas  │   │   (WebM)    │   │ Binary │   │ (libx264) │───────▶│  Kick  │
 └───────────┘   └─────────────┘   └────────┘   └───────────┘        └────────┘
+        │
+        ▼
+   omnistream.json
 ```
 
-## Solved Problems
+## Data Storage
 
-1. **RTMP Handshake / Twitch Drop**: Twitch abruptly disconnected our pure Node.js RTMP stream because Twitch ingest servers implicitly require an audio track and strict FLV timing. FFmpeg solves this natively by generating a silent `anullsrc` track and handling the FLV muxing precisely.
-2. **Kick TLS/Endpoint Errors**: Kick uses `rtmps://` over 443 and requires the stream destination to include the `/app` endpoint before the stream key. This has been corrected in the FFmpeg `tee` string, with `onfail=ignore` added to prevent one failing platform from crashing the whole broadcast.
-3. **MediaRecorder Stalling**: `konvaStage.toCanvas()` returns a static, detached canvas. Capturing a stream from it resulted in 1 frame and caused FFmpeg to wait indefinitely (`Starting FFmpeg...` hang). We resolved this by restoring a 30fps `captureInterval` loop that continuously composites the Konva stage onto a persistent offscreen `tempCanvas`.
+All data is stored in `omnistream.json`:
 
-## Current Problem (To Be Fixed Next Session)
-
-### Problem 1: Frame Duplication / VFR Bitrate Starvation / Visual Lag
-**Symptoms**:
-- FFmpeg logs indicate it is interpreting the input as `1k fps, 1k tbn` (1000 frames per second).
-- FFmpeg outputs `More than 1000 frames duplicated` continuously.
-- The stream has visual lag, unstable bitrate, and "ghosting" or traces when moving images.
-- Moving elements on the canvas causes high compression artifacts.
-
-**Root Cause**: 
-`MediaRecorder` on Chrome/WebM outputs a Variable Frame Rate (VFR) container by default, or the 30fps `tempCanvas.captureStream(30)` has inconsistent timestamps. FFmpeg sees the WebM timestamps, gets confused, and tries to encode at 1000 FPS to compensate. Since we constrained the bitrate to `4500k` (`-b:v 4500k`), FFmpeg violently starves the video quality to encode 1000 frames every second, leaving no bits for motion (causing the "traces").
-
-**Proposed Fix**:
-In `server.cjs`, we must strictly force a Constant Frame Rate (CFR) in FFmpeg:
-1. Add `-r 30` before `-i pipe:0` to force FFmpeg to read the pipe at 30 fps.
-2. Add `-r 30` after `-i pipe:0` to force output at 30 fps.
-3. Add `-vsync cfr` or `-fps_mode cfr` to explicitly prevent FFmpeg from attempting to interpolate to 1000 fps.
+```json
+{
+  "scenes": [
+    {
+      "id": "default",
+      "name": "Main",
+      "layers": [
+        {
+          "id": "1234567890",
+          "type": "image",
+          "active": true,
+          "x": 960,
+          "y": 540,
+          "width": 400,
+          "height": 300,
+          "scaleX": 1,
+          "scaleY": 1,
+          "rotation": 0,
+          "imageConfig": { "opacity": 1, "scaleX": 1, "scaleY": 1 },
+          "imageSrc": "/path/to/image.png"
+        },
+        {
+          "id": "1234567891",
+          "type": "text",
+          "active": true,
+          "textConfig": { "text": "Hello", "fontSize": 36, "color": "#ffffff", "fontFamily": "Inter" }
+        }
+      ],
+      "updated_at": 1776486198510
+    }
+  ],
+  "settings": {
+    "platforms": ["twitch"],
+    "resolution": "1080p30",
+    "twitchIngest": "",
+    "kickIngest": ""
+  }
+}
+```
 
 ## File Structure
 
 ```
 OmniStreamStudio/
-├── server.cjs          # WebSocket ingest -> FFmpeg pipeline
-├── check_status.ts     # CLI tool to check Twitch/Kick live status
+├── server.cjs          # Node.js WebSocket + FFmpeg server
+├── omnistream.json    # JSON data storage
+├── check_status.ts    # CLI tool to check Twitch/Kick live status
 ├── web/
-│   ├── main.ts     # Frontend with Konva and MediaRecorder
+│   ├── main.ts        # Frontend with Konva and MediaRecorder
 │   ├── index.html
 │   └── styles.css
-├── .env            # Stream keys
+├── .env               # Stream keys
 ├── package.json
 └── README.md
 ```
@@ -67,18 +98,20 @@ node server.cjs
 # Terminal 2 - Start frontend
 bun run dev
 
-# Terminal 3 - Check Stream Status
+# Terminal 3 - Check Stream Status (optional)
 bun check_status.ts
 ```
 
-Open http://localhost:6969, click GO LIVE.
+Open http://localhost:6969
 
-## Old Tauri Version
+## Features Implemented
 
-The original Tauri-based version used FFmpeg for encoding. See git history for:
-- `src-tauri/` - Rust backend
-- GPU capture via gpu-screen-recorder
-- FFmpeg tee for dual streaming
+- **Scenes System**: Add, delete, switch between scenes
+- **Layers**: Image, Text, HTML, Media, Widgets (clock, countdown)
+- **Compositing**: Konva.js canvas with drag/resize/rotate
+- **Audio**: Microphone and desktop capture support
+- **Storage**: JSON file (human-readable, easy to edit)
+- **Dual Streaming**: Twitch and Kick via FFmpeg
 
 ## License
 

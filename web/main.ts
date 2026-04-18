@@ -1,16 +1,10 @@
 import Konva from 'konva';
-import html2canvas from 'html2canvas';
-import { Output, Mp4OutputFormat, CanvasSource, StreamTarget, VideoEncodingConfig } from 'mediabunny';
 
-console.log('main.ts loaded');
-
-// --- Configuration ---
+// Stage dimensions (1080p)
 const STAGE_WIDTH = 1920;
 const STAGE_HEIGHT = 1080;
-const ASPECT_RATIO = 16 / 9;
 const WS_URL = 'ws://localhost:6970';
 const PROXY_URL = 'http://localhost:6971/proxy?url=';
-const LOCAL_URL = 'http://localhost:6971/local?path=';
 
 // --- State ---
 interface LayerConfig {
@@ -143,162 +137,44 @@ function deleteSelectedLayer() {
   }
 }
 
-// --- SQLite Persistence ---
-import initSqlJs, { Database } from 'sql.js';
-
-let db: Database | null = null;
-
-interface StreamSettings {
-  platforms: string[];
-  resolution: string;
-  twitchIngest: string;
-  kickIngest: string;
-}
-
-function getDefaultStreamSettings(): StreamSettings {
-  return {
-    platforms: [],
-    resolution: '1080p30',
-    twitchIngest: '',
-    kickIngest: '',
-  };
-}
-
-async function initDatabase() {
-  try {
-    const SQL = await initSqlJs({
-      locateFile: (file: string) => `https://sql.js.org/dist/${file}`,
-    });
-    
-    const stored = localStorage.getItem('omnistream_db');
-    if (stored) {
-      try {
-        const arr = JSON.parse(stored);
-        const data = new Uint8Array(arr);
-        db = new SQL.Database(data);
-      } catch (e) {
-        console.error('Failed to load stored db:', e);
-        db = new SQL.Database();
-      }
-    } else {
-      db = new SQL.Database();
-    }
-    
-    db.run(`
-      CREATE TABLE IF NOT EXISTS scenes (
-        id TEXT PRIMARY KEY,
-        name TEXT,
-        layers TEXT
-      )
-    `);
-    
-    db.run(`
-      CREATE TABLE IF NOT EXISTS stream_settings (
-        id INTEGER PRIMARY KEY CHECK (id = 1),
-        platforms TEXT,
-        resolution TEXT,
-        twitch_ingest TEXT,
-        kick_ingest TEXT
-      )
-    `);
-    
-    const result = db.exec('SELECT COUNT(*) FROM stream_settings');
-    if (result.length === 0 || result[0].values[0][0] === 0) {
-      const def = getDefaultStreamSettings();
-      db.run(
-        'INSERT INTO stream_settings (id, platforms, resolution, twitch_ingest, kick_ingest) VALUES (1, ?, ?, ?, ?)',
-        [JSON.stringify(def.platforms), def.resolution, def.twitchIngest, def.kickIngest]
-      );
-    }
-    
-    console.log('SQLite database initialized');
-    return true;
-  } catch (e) {
-    console.error('Failed to init database:', e);
-    return false;
-  }
-}
-
 function saveToStorage() {
-  if (!db) return;
-  
-  try {
-    db.run('DELETE FROM scenes');
-    state.scenes.forEach(scene => {
-      db!.run(
-        'INSERT INTO scenes (id, name, layers) VALUES (?, ?, ?)',
-        [scene.id, scene.name, JSON.stringify(scene.layers)]
-      );
-    });
+  // Save all scenes to server database
+  const scene = state.scenes.find(s => s.id === state.activeSceneId);
+  if (scene) {
+    const currentLayers = state.layers.map(layer => ({
+      id: layer.id,
+      type: layer.type,
+      active: layer.active,
+      x: layer.konvaNode?.x(),
+      y: layer.konvaNode?.y(),
+      width: layer.konvaNode?.width(),
+      height: layer.konvaNode?.height(),
+      scaleX: layer.konvaNode?.scaleX(),
+      scaleY: layer.konvaNode?.scaleY(),
+      rotation: layer.konvaNode?.rotation(),
+      textConfig: (layer as any).textConfig,
+      widgetConfig: (layer as any).widgetConfig,
+      imageConfig: (layer as any).imageConfig,
+      imageSrc: (layer as any).imageSrc,
+    }));
     
-    db!.run('UPDATE stream_settings SET platforms = ? WHERE id = 1', [
-      JSON.stringify(getSelectedPlatforms()),
-    ]);
+    // Update the scene with current layers data before saving
+    scene.layers = currentLayers;
     
-    const data = db.export();
-    const arr = Array.from(data);
-    localStorage.setItem('omnistream_db', JSON.stringify(arr));
-  } catch (e) {
-    console.error('Failed to save:', e);
+    saveSceneToServer(scene);
+    saveSettingsToServer();
+    console.log('Saved to server:', scene.name, scene.layers.length, 'layers');
   }
 }
 
 function loadFromStorage(): boolean {
-  if (!db) return false;
-  
-  try {
-    const scenes = db.exec('SELECT id, name, layers FROM scenes');
-    if (scenes.length > 0 && scenes[0].values.length > 0) {
-      state.scenes = [];
-      for (const row of scenes[0].values) {
-        state.scenes.push({
-          id: row[0] as string,
-          name: row[1] as string,
-          layers: JSON.parse(row[2] as string),
-        });
-      }
-      state.activeSceneId = state.scenes[0]?.id || 'default';
-      console.log('Loaded from SQLite:', state.scenes.length, 'scenes');
-      return true;
-    }
-  } catch (e) {
-    console.error('Failed to load:', e);
-  }
+  // Data is loaded via WebSocket from server in connectWebSocket()
+  // This function is kept for compatibility but doesn't do anything now
   return false;
 }
 
-function getStreamSettings(): StreamSettings {
-  if (!db) return getDefaultStreamSettings();
-  
-  try {
-    const result = db.exec('SELECT platforms, resolution, twitch_ingest, kick_ingest FROM stream_settings WHERE id = 1');
-    if (result.length > 0 && result[0].values.length > 0) {
-      const row = result[0].values[0];
-      return {
-        platforms: JSON.parse(row[0] as string || '[]'),
-        resolution: row[1] as string || '1080p30',
-        twitchIngest: row[2] as string || '',
-        kickIngest: row[3] as string || '',
-      };
-    }
-  } catch (e) {
-    console.error('Failed to get stream settings:', e);
-  }
-  return getDefaultStreamSettings();
-}
-
 function saveStreamSettings(settings: StreamSettings) {
-  if (!db) return;
-  
-  try {
-    db.run(
-      'UPDATE stream_settings SET platforms = ?, resolution = ?, twitch_ingest = ?, kick_ingest = ? WHERE id = 1',
-      [JSON.stringify(settings.platforms), settings.resolution, settings.twitchIngest, settings.kickIngest]
-    );
-    saveToStorage();
-  } catch (e) {
-    console.error('Failed to save stream settings:', e);
-  }
+  saveSettingsToServer();
 }
 
 function getSelectedPlatforms(): string[] {
@@ -424,6 +300,7 @@ function switchScene(sceneId: string) {
       labelNode.offsetY(labelNode.height() / 2);
       node = labelNode;
     } else if (type === 'image' || type === 'html') {
+      const originalSrc = (config as any).imageSrc;
       node = new Konva.Image({
         x: config.x || STAGE_WIDTH / 2,
         y: config.y || STAGE_HEIGHT / 2,
@@ -434,10 +311,17 @@ function switchScene(sceneId: string) {
         scaleY: config.scaleY ?? 1,
         rotation: config.rotation || 0,
       });
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.src = (config as any).imageSrc || '';
-      node.image(img);
+      if (originalSrc) {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          node.image(img);
+          state.konvaLayer.batchDraw();
+        };
+        // Use proxy for URLs
+        img.src = originalSrc.startsWith('http') ? PROXY_URL + encodeURIComponent(originalSrc) : originalSrc;
+        node.image(img);
+      }
     }
     
     if (node) {
@@ -448,11 +332,17 @@ function switchScene(sceneId: string) {
       if (config.textConfig) layer.textConfig = config.textConfig;
       if (config.widgetConfig) layer.widgetConfig = config.widgetConfig;
       if (config.imageConfig) layer.imageConfig = config.imageConfig;
+      if ((config as any).imageSrc) layer.imageSrc = (config as any).imageSrc;
       state.layers.push(layer);
     }
   });
   
   state.konvaLayer.batchDraw();
+  
+  // Force a redraw to ensure canvas is visible
+  state.konvaStage?.batchDraw();
+  state.konvaStage?.draw();
+  
   renderLayersList();
   renderScenesList();
   updatePreview();
@@ -853,6 +743,68 @@ function addWidgetLayer(type: string, configVal: number, color: string, font: st
   updatePreview();
 }
 
+// --- Media Layer (Video/Audio playback on canvas) ---
+function addMediaLayer(filePath: string) {
+  if (!state.konvaLayer) return;
+  
+  const id = Date.now().toString();
+  const isVideo = filePath.match(/\.(mp4|webm|ogg|mov)$/i);
+  
+  // Create audio element for playback
+  const audio = new Audio();
+  audio.src = 'file://' + filePath;
+  audio.loop = false;
+  audio.volume = 1;
+  
+  const layer: any = {
+    id,
+    type: 'media',
+    active: true,
+    mediaSrc: filePath,
+    isVideo,
+    audioElement: audio,
+  };
+  
+  state.layers.push(layer);
+  
+  if (isVideo) {
+    // For video, we'd add a video element overlay
+    audio.play().catch(e => console.log('Auto-play prevented'));
+  }
+  
+  renderLayersList();
+  updatePreview();
+}
+
+// --- Audio Sources (for streaming) ---
+let audioContext: AudioContext | null = null;
+let audioSourceNode: MediaStreamAudioSourceNode | null = null;
+
+async function getAudioStreamForRecording(): Promise<MediaStream | null> {
+  const inputStream = (window as any).currentAudioInput as MediaStream;
+  const desktopStream = (window as any).desktopAudioStream as MediaStream;
+  
+  if (!inputStream && !desktopStream) return null;
+  
+  // If both, mix them
+  if (inputStream && desktopStream) {
+    if (!audioContext) {
+      audioContext = new AudioContext();
+    }
+    
+    const inputNode = audioContext.createMediaStreamSource(inputStream);
+    const desktopNode = audioContext.createMediaStreamSource(desktopStream);
+    
+    const dest = audioContext.createMediaStreamDestination();
+    inputNode.connect(dest);
+    desktopNode.connect(dest);
+    
+    return dest.stream;
+  }
+  
+  return inputStream || desktopStream;
+}
+
 // --- HTML Overlay Layer ---
 interface HtmlOverlayLayer {
   id: string;
@@ -1097,13 +1049,18 @@ function openSceneRenameDialog(sceneId: string) {
 }
 
 function initScenesUI() {
+  console.log('initScenesUI called');
   const addSceneBtn = document.getElementById('add-scene-btn');
-  console.log('add-scene-btn found:', !!addSceneBtn);
+  console.log('add-scene-btn check:', addSceneBtn, 'id:', addSceneBtn?.id);
   if (addSceneBtn) {
-    addSceneBtn.addEventListener('click', () => {
-      console.log('Add scene button clicked');
+    addSceneBtn.addEventListener('click', (e) => {
+      console.log('Add scene button clicked!');
+      e.preventDefault();
       addNewScene();
     });
+    console.log('click handler set');
+  } else {
+    console.error('ERROR: add-scene-btn NOT FOUND!');
   }
   renderScenesList();
 }
@@ -1197,6 +1154,103 @@ function showGifOverlay(layerId: string, gifPath: string) {
   };
 }
 
+// --- Audio Volume Meters ---
+let meterAudioContext: AudioContext | null = null;
+let micAnalyser: AnalyserNode | null = null;
+let desktopAnalyser: AnalyserNode | null = null;
+const audioMeterLayers: Map<string, { node: Konva.Shape; source: string }> = new Map();
+
+function startAudioMeters(micStream: MediaStream | null, desktopStream: MediaStream | null) {
+  if (!state.konvaLayer) return;
+  
+  if (!meterAudioContext) {
+    meterAudioContext = new AudioContext();
+  }
+  
+  const meterY = 50;
+  const meterWidth = 300;
+  const meterHeight = 20;
+  
+  // Create mic meter
+  if (micStream) {
+    const micSource = audioContext.createMediaStreamSource(micStream);
+    micAnalyser = audioContext.createAnalyser();
+    micAnalyser.fftSize = 256;
+    micSource.connect(micAnalyser);
+    
+    const micMeter = new Konva.Shape({
+      x: STAGE_WIDTH / 2 - meterWidth / 2,
+      y: meterY,
+      width: meterWidth,
+      height: meterHeight,
+      sceneFunc: (ctx, shape) => {
+        if (!micAnalyser) return;
+        const dataArray = new Uint8Array(micAnalyser.frequencyBinCount);
+        micAnalyser.getByteFrequencyData(dataArray);
+        const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+        const barWidth = (meterWidth * avg) / 255;
+        
+        ctx.beginPath();
+        ctx.fillStyle = '#00ff00';
+        ctx.fillRect(shape.x(), shape.y(), barWidth, meterHeight);
+        ctx.fillStyle = '#333';
+        ctx.fillRect(shape.x() + barWidth, shape.y(), meterWidth - barWidth, meterHeight);
+        ctx.fillStyle = '#fff';
+        ctx.font = '10px Inter';
+        ctx.fillText('MIC', shape.x(), shape.y() + meterHeight + 12);
+      },
+      listening: false,
+    });
+    
+    state.konvaLayer.add(micMeter);
+    audioMeterLayers.set('mic', { node: micMeter, source: 'mic' });
+  }
+  
+  // Create desktop audio meter
+  if (desktopStream) {
+    const desktopSource = audioContext.createMediaStreamSource(desktopStream);
+    desktopAnalyser = audioContext.createAnalyser();
+    desktopAnalyser.fftSize = 256;
+    desktopSource.connect(desktopAnalyser);
+    
+    const desktopMeter = new Konva.Shape({
+      x: STAGE_WIDTH / 2 - meterWidth / 2,
+      y: meterY + 40,
+      width: meterWidth,
+      height: meterHeight,
+      sceneFunc: (ctx, shape) => {
+        if (!desktopAnalyser) return;
+        const dataArray = new Uint8Array(desktopAnalyser.frequencyBinCount);
+        desktopAnalyser.getByteFrequencyData(dataArray);
+        const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+        const barWidth = (meterWidth * avg) / 255;
+        
+        ctx.beginPath();
+        ctx.fillStyle = '#00aaff';
+        ctx.fillRect(shape.x(), shape.y(), barWidth, meterHeight);
+        ctx.fillStyle = '#333';
+        ctx.fillRect(shape.x() + barWidth, shape.y(), meterWidth - barWidth, meterHeight);
+        ctx.fillStyle = '#fff';
+        ctx.font = '10px Inter';
+        ctx.fillText('DESKTOP', shape.x(), shape.y() + meterHeight + 12);
+      },
+      listening: false,
+    });
+    
+    state.konvaLayer.add(desktopMeter);
+    audioMeterLayers.set('desktop', { node: desktopMeter, source: 'desktop' });
+  }
+  
+  // Animate meters
+  requestAnimationFrame(function updateMeters() {
+    if (!state.isLive) return;
+    if (audioMeterLayers.size > 0) {
+      state.konvaLayer.batchDraw();
+    }
+    requestAnimationFrame(updateMeters);
+  });
+}
+
 function deleteLayer(id: string) {
   const layer = state.layers.find(l => l.id === id);
   if (layer && layer.konvaNode) {
@@ -1234,6 +1288,13 @@ editDialog.innerHTML = `
   </div>
 `;
 document.body.appendChild(editDialog);
+
+// Set up edit dialog event listeners
+document.getElementById('edit-dialog-close')?.addEventListener('click', closeEditDialog);
+document.getElementById('save-edit-btn')?.addEventListener('click', saveEditDialog);
+editDialog.addEventListener('click', (e) => {
+  if (e.target === editDialog) closeEditDialog();
+});
 
 let editingLayerId: string | null = null;
 let editingLayerType: string | null = null;
@@ -1422,12 +1483,16 @@ function openEditDialog(id: string) {
   }
   
   editDialog.classList.remove('hidden');
-  editDialog.style.display = 'flex';
+  editDialog.classList.remove('hidden');
+  editDialog.style.cssText = 'display: flex !important;';
 }
 
 function closeEditDialog() {
-  editDialog.classList.add('hidden');
-  editDialog.style.display = 'none';
+  const editDialog = document.getElementById('edit-layer-dialog');
+  if (editDialog) {
+    editDialog.classList.add('hidden');
+    editDialog.style.cssText = 'display: none !important;';
+  }
   editingLayerId = null;
   editingLayerType = null;
 }
@@ -1511,213 +1576,263 @@ function saveEditDialog() {
   saveToStorage();
 }
 
-// Edit dialog event listeners
-document.getElementById('edit-dialog-close')?.addEventListener('click', closeEditDialog);
-document.getElementById('save-edit-btn')?.addEventListener('click', saveEditDialog);
-editDialog.addEventListener('click', (e) => {
-  if (e.target === editDialog) closeEditDialog();
-});
-
-// --- Dialog Elements ---
-const dialog = document.getElementById('add-layer-dialog')!;
-const dialogClose = document.getElementById('dialog-close')!;
-const dialogTabs = dialog.querySelectorAll('.dialog-tab');
-const dialogPanels = dialog.querySelectorAll('.dialog-panel');
-const imageFileInput = document.getElementById('image-file-input') as HTMLInputElement;
-const selectImageBtn = document.getElementById('select-image-btn')!;
-const urlInput = document.getElementById('url-input') as HTMLInputElement;
-const loadUrlBtn = document.getElementById('load-url-btn')!;
-const htmlUrlInput = document.getElementById('html-url-input') as HTMLInputElement;
-const htmlFileInput = document.getElementById('html-file-input') as HTMLInputElement;
-const selectHtmlBtn = document.getElementById('select-html-btn')!;
-const loadHtmlBtn = document.getElementById('load-html-btn')!;
-
-console.log('Dialog elements:', { dialog, loadHtmlBtn, htmlUrlInput });
-
 // --- Dialog Functions ---
 function openDialog() {
-  dialog.classList.remove('hidden');
-  dialog.style.display = 'flex';
+  console.log('openDialog called');
+  initDialogListeners();
+  const dialog = document.getElementById('add-layer-dialog');
+  console.log('dialog element:', dialog);
+  if (dialog) {
+    // Remove hidden class to be safe
+    dialog.classList.remove('hidden');
+    // Set display directly - force to override any CSS
+    dialog.setAttribute('style', 'display: flex !important; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center;');
+    console.log('dialog set to visible');
+  } else {
+    console.error('Dialog element not found!');
+  }
 }
 
 function closeDialog() {
-  dialog.classList.add('hidden');
-  dialog.style.display = 'none';
+  const dialog = document.getElementById('add-layer-dialog');
+  if (dialog) {
+    dialog.classList.add('hidden');
+    dialog.style.cssText = 'display: none !important;';
+  }
 }
 
 function setDialogTab(type: string) {
-  dialogTabs.forEach(tab => {
+  const dialog = document.getElementById('add-layer-dialog');
+  if (!dialog) return;
+  
+  const tabs = dialog.querySelectorAll('.dialog-tab');
+  const panels = dialog.querySelectorAll('.dialog-panel');
+  tabs.forEach((tab: any) => {
     tab.classList.toggle('active', tab.getAttribute('data-type') === type);
   });
-  dialogPanels.forEach(panel => {
+  panels.forEach((panel: any) => {
     panel.classList.toggle('active', panel.getAttribute('data-panel') === type);
   });
 }
 
-// --- Add Layer Button ---
-// Now set up in DOMContentLoaded after elements exist
+// Dialog elements setup - called when DOM is ready
+let dialogInitialized = false;
 
-dialogClose.addEventListener('click', closeDialog);
-
-dialog.addEventListener('click', (e) => {
-  if (e.target === dialog) closeDialog();
-});
-
-dialogTabs.forEach(tab => {
-  tab.addEventListener('click', () => {
-    setDialogTab(tab.getAttribute('data-type')!);
+function initDialogListeners() {
+  console.log('initDialogListeners called, dialogInitialized:', dialogInitialized);
+  if (dialogInitialized) {
+    console.log('Already initialized, returning');
+    return;
+  }
+  
+  const dialog = document.getElementById('add-layer-dialog');
+  console.log('initDialogListeners - dialog:', dialog);
+  if (!dialog) {
+    console.error('Dialog not found in initDialogListeners');
+    return;
+  }
+  
+  const dialogClose = document.getElementById('dialog-close');
+  dialogClose?.addEventListener('click', closeDialog);
+  
+  dialog.addEventListener('click', (e) => {
+    if (e.target === dialog) closeDialog();
   });
-});
-
-// Image tab
-selectImageBtn.addEventListener('click', () => imageFileInput.click());
-imageFileInput.addEventListener('change', (e) => {
-  const file = (e.target as HTMLInputElement).files?.[0];
-  if (file) {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      saveState();
-      addImageLayer(e.target?.result as string);
-      closeDialog();
-    };
-    reader.readAsDataURL(file);
-  }
-});
-
-// URL tab
-loadUrlBtn.addEventListener('click', () => {
-  const url = urlInput.value.trim();
-  if (url) {
-    saveState();
-    addImageLayer(url);
-    closeDialog();
-  }
-});
-
-// HTML tab - URL option
-console.log('Setting up loadHtmlBtn listener');
-loadHtmlBtn.addEventListener('click', async () => {
-  try {
-    console.log('Load HTML clicked');
-    loadHtmlBtn.textContent = 'Loading...';
-    (loadHtmlBtn as HTMLButtonElement).disabled = true;
-    
-    const url = htmlUrlInput.value.trim();
-    console.log('URL value:', url);
+  
+  const tabs = dialog.querySelectorAll('.dialog-tab');
+  tabs.forEach((tab: any) => {
+    tab.addEventListener('click', () => setDialogTab(tab.getAttribute('data-type')));
+  });
+  
+  // Image tab
+  const imageFileInput = document.getElementById('image-file-input') as HTMLInputElement;
+  const selectImageBtn = document.getElementById('select-image-btn');
+  const urlInput = document.getElementById('url-input') as HTMLInputElement;
+  const loadUrlBtn = document.getElementById('load-url-btn');
+  
+  selectImageBtn?.addEventListener('click', () => imageFileInput?.click());
+  imageFileInput?.addEventListener('change', (e) => {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        saveState();
+        addImageLayer(e.target?.result as string);
+        closeDialog();
+      };
+      reader.readAsDataURL(file);
+    }
+  });
+  
+  loadUrlBtn?.addEventListener('click', () => {
+    const url = urlInput?.value.trim();
     if (url) {
       saveState();
-      
-      // Determine if it's a local file or remote URL
-      let fetchUrl;
-      if (url.startsWith('/') || url.startsWith('overlays/')) {
-        // Local file - prefix with local endpoint
-        const path = url.startsWith('/') ? url.slice(1) : url;
-        fetchUrl = LOCAL_URL + encodeURIComponent(path);
-      } else if (url.startsWith('http://') || url.startsWith('https://')) {
-        // Remote URL
-        fetchUrl = PROXY_URL + encodeURIComponent(url);
-      } else {
-        // Treat as filename in overlays folder
-        fetchUrl = LOCAL_URL + encodeURIComponent('overlays/' + url);
-      }
-      
-      console.log('Fetching from:', fetchUrl);
-      const response = await fetch(fetchUrl);
-      
-      if (!response.ok) {
-        throw new Error('File not found: ' + response.status);
-      }
-      
-      const html = await response.text();
-      console.log('HTML loaded, length:', html.length);
-      addHtmlOverlayLayer(html, 30, 400, 200);
+      addImageLayer(url);
       closeDialog();
     }
-  } catch (e) {
-    console.error('Error in loadHtmlBtn:', e);
-    alert('Failed to load HTML: ' + (e as Error).message);
-  } finally {
-    loadHtmlBtn.textContent = 'Load HTML';
-    (loadHtmlBtn as HTMLButtonElement).disabled = false;
-  }
-});
-
-htmlUrlInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    loadHtmlBtn.click();
-  }
-});
-
-// Text tab
-const textInput = document.getElementById('text-input') as HTMLInputElement;
-const textFontSize = document.getElementById('text-font-size') as HTMLSelectElement;
-const textColor = document.getElementById('text-color') as HTMLInputElement;
-const addTextBtn = document.getElementById('add-text-btn') as HTMLButtonElement;
-
-addTextBtn?.addEventListener('click', () => {
-  const text = textInput.value.trim();
-  if (text) {
-    saveState();
-    addTextLayer(text, parseInt(textFontSize.value), textColor.value);
-    closeDialog();
-  }
-});
-
-textInput?.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    addTextBtn.click();
-  }
-});
-
-// Widgets tab
-const widgetTypeSelect = document.getElementById('widget-type-select') as HTMLSelectElement;
-const widgetConfigGroup = document.getElementById('widget-config-group') as HTMLDivElement;
-const widgetConfigInput = document.getElementById('widget-config-input') as HTMLInputElement;
-const widgetConfigLabel = document.getElementById('widget-config-label') as HTMLLabelElement;
-const widgetColor = document.getElementById('widget-color') as HTMLInputElement;
-const widgetBgColor = document.getElementById('widget-bg-color') as HTMLInputElement;
-const widgetFont = document.getElementById('widget-font') as HTMLSelectElement;
-const widgetBgShape = document.getElementById('widget-bg-shape') as HTMLSelectElement;
-const addWidgetBtn = document.getElementById('add-widget-btn') as HTMLButtonElement;
-
-widgetTypeSelect?.addEventListener('change', () => {
-  if (widgetTypeSelect.value === 'countdown') {
-    widgetConfigGroup.style.display = 'block';
-    widgetConfigLabel.textContent = 'Minutes';
-  } else {
-    widgetConfigGroup.style.display = 'none';
-  }
-});
-
-addWidgetBtn?.addEventListener('click', () => {
-  const type = widgetTypeSelect.value;
-  const configVal = parseFloat(widgetConfigInput.value) || 5;
-  const color = widgetColor.value;
-  const font = widgetFont.value;
-  const bgColor = widgetBgColor.value;
-  const bgShape = widgetBgShape.value;
+  });
   
-  saveState();
-  addWidgetLayer(type, configVal, color, font, bgColor, bgShape);
-  closeDialog();
-});
-
-// HTML tab - File option
-selectHtmlBtn.addEventListener('click', () => htmlFileInput.click());
-htmlFileInput.addEventListener('change', (e) => {
-  const file = (e.target as HTMLInputElement).files?.[0];
-  if (file) {
-    saveState();
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      addHtmlOverlayLayer(e.target?.result as string, 30, 400, 200);
+  // HTML tab
+  const htmlUrlInput = document.getElementById('html-url-input') as HTMLInputElement;
+  const loadHtmlBtn = document.getElementById('load-html-btn');
+  
+  loadHtmlBtn?.addEventListener('click', async () => {
+    if (!htmlUrlInput || !loadHtmlBtn) return;
+    const url = htmlUrlInput.value.trim();
+    if (url) {
+      saveState();
+      addHtmlLayer(url);
       closeDialog();
-    };
-    reader.readAsText(file);
+    }
+  });
+  
+  htmlUrlInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') loadHtmlBtn?.click();
+  });
+  
+  // Text tab
+  const textInput = document.getElementById('text-input') as HTMLInputElement;
+  const textFontSize = document.getElementById('text-font-size') as HTMLSelectElement;
+  const textColor = document.getElementById('text-color') as HTMLInputElement;
+  const addTextBtn = document.getElementById('add-text-btn');
+  
+  addTextBtn?.addEventListener('click', () => {
+    if (textInput?.value.trim()) {
+      saveState();
+      addTextLayer(textInput.value.trim(), parseInt(textFontSize?.value || '36'), textColor?.value || '#ffffff');
+      closeDialog();
+    }
+  });
+  
+  textInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') addTextBtn?.click();
+  });
+  
+  // Widgets tab
+  const widgetTypeSelect = document.getElementById('widget-type-select') as HTMLSelectElement;
+  const widgetConfigGroup = document.getElementById('widget-config-group');
+  const widgetConfigInput = document.getElementById('widget-config-input') as HTMLInputElement;
+  const widgetConfigLabel = document.getElementById('widget-config-label');
+  const widgetColor = document.getElementById('widget-color') as HTMLInputElement;
+  const widgetBgColor = document.getElementById('widget-bg-color') as HTMLInputElement;
+  const widgetFont = document.getElementById('widget-font') as HTMLSelectElement;
+  const widgetBgShape = document.getElementById('widget-bg-shape') as HTMLSelectElement;
+  const addWidgetBtn = document.getElementById('add-widget-btn');
+  
+  widgetTypeSelect?.addEventListener('change', () => {
+    if (widgetConfigGroup && widgetConfigLabel && widgetConfigInput) {
+      if (widgetTypeSelect.value === 'countdown') {
+        widgetConfigGroup.style.display = 'block';
+        widgetConfigLabel.textContent = 'Minutes';
+      } else {
+        widgetConfigGroup.style.display = 'none';
+      }
+    }
+  });
+  
+  addWidgetBtn?.addEventListener('click', () => {
+    saveState();
+    addWidgetLayer(
+      widgetTypeSelect?.value || 'clock',
+      parseFloat(widgetConfigInput?.value || '5'),
+      widgetColor?.value || '#00fa9a',
+      widgetFont?.value || 'Inter',
+      widgetBgColor?.value || '#1a1a1c',
+      widgetBgShape?.value || 'pill'
+    );
+    closeDialog();
+  });
+  
+  // Media tab
+  const mediaFileInput = document.getElementById('media-file-input') as HTMLInputElement;
+  const selectMediaBtn = document.getElementById('select-media-btn');
+  const mediaSrcInput = document.getElementById('media-src-input') as HTMLInputElement;
+  const addMediaBtn = document.getElementById('add-media-btn');
+  
+  selectMediaBtn?.addEventListener('click', () => mediaFileInput?.click());
+  mediaFileInput?.addEventListener('change', (e) => {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (file) {
+      (mediaSrcInput as any).value = file.path || file.name;
+      const preview = document.getElementById('media-preview');
+      if (preview) preview.textContent = `${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`;
+    }
+  });
+  addMediaBtn?.addEventListener('click', () => {
+    const src = mediaSrcInput?.value;
+    if (src) {
+      saveState();
+      addMediaLayer(src);
+      closeDialog();
+    }
+  });
+  
+  // Audio tab
+  async function initAudioDevices() {
+    const audioInputDevice = document.getElementById('audio-input-device') as HTMLSelectElement;
+    if (!audioInputDevice) return;
+    
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audioInputs = devices.filter(d => d.kind === 'audioinput');
+      
+      audioInputs.forEach((device, index) => {
+        const option = document.createElement('option');
+        option.value = device.deviceId;
+        option.textContent = device.label || `Microphone ${index + 1}`;
+        audioInputDevice.appendChild(option);
+      });
+    } catch (e) {
+      console.error('Failed to enumerate audio devices:', e);
+    }
   }
-});
-
-// --- Undo/Redo/Delete Buttons ---
+  initAudioDevices();
+  
+  const captureDesktopAudioBtn = document.getElementById('capture-desktop-audio-btn');
+  const addAudioBtn = document.getElementById('add-audio-btn');
+  
+  captureDesktopAudioBtn?.addEventListener('click', async () => {
+    const audioPreview = document.getElementById('audio-preview');
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+      const audioTracks = stream.getAudioTracks();
+      if (audioTracks.length > 0) {
+        (window as any).desktopAudioStream = stream;
+        if (audioPreview) audioPreview.textContent = `Capturing: ${audioTracks[0].label}`;
+      }
+    } catch (e) {
+      console.error('Desktop audio capture failed:', e);
+      if (audioPreview) audioPreview.textContent = 'Capture failed';
+    }
+  });
+  
+  addAudioBtn?.addEventListener('click', async () => {
+    const audioInputDevice = document.getElementById('audio-input-device') as HTMLSelectElement;
+    const audioPreview = document.getElementById('audio-preview');
+    
+    const inputDeviceId = audioInputDevice?.value;
+    if (inputDeviceId && inputDeviceId !== '') {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: inputDeviceId } });
+        (window as any).currentAudioInput = stream;
+      } catch (e) {
+        console.error('Mic access failed:', e);
+      }
+    } else {
+      (window as any).currentAudioInput = null;
+    }
+    
+    const desktopStream = (window as any).desktopAudioStream as MediaStream;
+    const status: string[] = [];
+    if ((window as any).currentAudioInput) status.push('Mic');
+    if (desktopStream) status.push('Desktop');
+    if (audioPreview) audioPreview.textContent = status.length > 0 ? status.join(' + ') + ' ready' : 'No audio';
+  });
+  
+  dialogInitialized = true;
+  console.log('Dialog listeners initialized');
+}
 // Now set up in DOMContentLoaded
 
 // Keyboard shortcuts
@@ -1769,11 +1884,39 @@ async function startCapture() {
     tempCtx.fillRect(0, 0, width, height);
     
     // Capture stream from the temp canvas at 30 FPS
-    const canvasStream = tempCanvas.captureStream(30);
+    let canvasStream = tempCanvas.captureStream(30);
     
-    // Try to find the best supported MIME type
+    // Add audio tracks if we have mic or desktop audio
+    const micStream = (window as any).currentAudioInput as MediaStream;
+    const desktopStream = (window as any).desktopAudioStream as MediaStream;
+    const hasAudio = !!(micStream || desktopStream);
+    
+    if (micStream) {
+      const audioTracks = micStream.getAudioTracks();
+      audioTracks.forEach(track => canvasStream.addTrack(track));
+      console.log('Added mic audio to stream');
+    }
+    
+    if (desktopStream) {
+      const desktopAudioTracks = desktopStream.getAudioTracks();
+      desktopAudioTracks.forEach(track => canvasStream.addTrack(track));
+      console.log('Added desktop audio to stream');
+    }
+    
+    // Start audio meters for visualization
+    if (hasAudio) {
+      startAudioMeters(micStream, desktopStream);
+    }
+    
+    // Try to find the best supported MIME type (with audio support)
     let mimeType = '';
-    const types = [
+    const types = hasAudio ? [
+      'video/webm;codecs=h264,opus',
+      'video/webm;codecs=vp9,opus',
+      'video/webm;codecs=vp8,opus',
+      'video/webm;codecs=daala',
+      'video/webm'
+    ] : [
       'video/webm;codecs=h264',
       'video/webm;codecs=vp9',
       'video/webm;codecs=vp8',
@@ -1852,6 +1995,12 @@ function stopCapture() {
     mediaRecorder = null;
   }
   
+  // Clean up audio meters
+  audioMeterLayers.forEach(({ node }) => {
+    node.destroy();
+  });
+  audioMeterLayers.clear();
+  
   streamReady = false;
   console.log('Capture stopped');
 }
@@ -1862,11 +2011,65 @@ function connectWebSocket() {
   
   state.ws.onopen = () => {
     console.log('WebSocket connected');
+    // Load scenes and settings from server DB
+    loadFromServer();
   };
   
   state.ws.onmessage = (event) => {
     try {
       const msg = JSON.parse(event.data);
+      
+      // Handle DB responses
+      if (msg.type === 'scenes_loaded') {
+        console.log('Scenes loaded from server:', msg.data.length);
+        state.scenes = msg.data;
+        state.activeSceneId = state.scenes[0]?.id || 'default';
+        if (state.scenes.length === 0) {
+          state.scenes = [{ id: 'default', name: 'Main', layers: [] }];
+          state.activeSceneId = 'default';
+        }
+        renderScenesList();
+        // Load layers for active scene
+        const activeScene = state.scenes.find(s => s.id === state.activeSceneId);
+        if (activeScene && activeScene.layers && activeScene.layers.length > 0) {
+          switchScene(state.activeSceneId);
+        }
+        return;
+      }
+      
+      if (msg.type === 'scene_saved') {
+        console.log('Scene saved:', msg.id);
+        return;
+      }
+      
+      if (msg.type === 'scene_deleted') {
+        console.log('Scene deleted:', msg.id);
+        return;
+      }
+      
+      if (msg.type === 'settings_loaded') {
+        console.log('Settings loaded from server:', msg.data);
+        // Apply settings
+        const settings = msg.data;
+        const twitchBtn = document.getElementById('toggle-twitch');
+        const kickBtn = document.getElementById('toggle-kick');
+        if (settings.platforms?.includes('twitch')) twitchBtn?.classList.add('active');
+        if (settings.platforms?.includes('kick')) kickBtn?.classList.add('active');
+        if (settings.resolution) qualitySelect.value = settings.resolution;
+        const ingestSelect = document.getElementById('ingest') as HTMLSelectElement;
+        if (ingestSelect && settings.twitchIngest) ingestSelect.value = settings.twitchIngest;
+        return;
+      }
+      
+      if (msg.type === 'settings_saved') {
+        console.log('Settings saved');
+        return;
+      }
+      
+      if (msg.type === 'error') {
+        console.error('Server error:', msg.message);
+        return;
+      }
       
       // Handle events (follows, alerts, etc.)
       if (msg.type === 'event' && msg.data) {
@@ -1884,6 +2087,66 @@ function connectWebSocket() {
   state.ws.onclose = () => {
     console.log('WebSocket disconnected');
   };
+}
+
+// Load data from server DB
+function loadFromServer() {
+  if (state.ws?.readyState === WebSocket.OPEN) {
+    state.ws.send(JSON.stringify({ type: 'db_load_scenes' }));
+    state.ws.send(JSON.stringify({ type: 'db_load_settings' }));
+  }
+}
+
+// Save scene to server DB
+function saveSceneToServer(scene: Scene) {
+  if (state.ws?.readyState === WebSocket.OPEN) {
+    state.ws.send(JSON.stringify({
+      type: 'db_save_scene',
+      data: {
+        id: scene.id,
+        name: scene.name,
+        layers: scene.layers.map(l => ({
+          id: l.id,
+          type: l.type,
+          active: l.active,
+          x: l.konvaNode?.x(),
+          y: l.konvaNode?.y(),
+          width: l.konvaNode?.width(),
+          height: l.konvaNode?.height(),
+          scaleX: l.konvaNode?.scaleX(),
+          scaleY: l.konvaNode?.scaleY(),
+          rotation: l.konvaNode?.rotation(),
+          textConfig: (l as any).textConfig,
+          widgetConfig: (l as any).widgetConfig,
+          imageConfig: (l as any).imageConfig,
+          imageSrc: (l as any).imageSrc,
+        }))
+      }
+    }));
+  }
+}
+
+// Save stream settings to server DB
+function saveSettingsToServer() {
+  const twitchBtn = document.getElementById('toggle-twitch');
+  const kickBtn = document.getElementById('toggle-kick');
+  const ingestSelect = document.getElementById('ingest') as HTMLSelectElement;
+  
+  const platforms: string[] = [];
+  if (twitchBtn?.classList.contains('active')) platforms.push('twitch');
+  if (kickBtn?.classList.contains('active')) platforms.push('kick');
+  
+  if (state.ws?.readyState === WebSocket.OPEN) {
+    state.ws.send(JSON.stringify({
+      type: 'db_save_settings',
+      data: {
+        platforms,
+        resolution: qualitySelect.value,
+        twitchIngest: ingestSelect?.value || '',
+        kickIngest: '',
+      }
+    }));
+  }
 }
 
 // Handle events from server
@@ -1996,11 +2259,16 @@ function startStream() {
     const twitchBtn = document.getElementById('toggle-twitch');
     const kickBtn = document.getElementById('toggle-kick');
     
+    const micStream = (window as any).currentAudioInput as MediaStream;
+    const desktopStream = (window as any).desktopAudioStream as MediaStream;
+    const sendAudio = !!(micStream || desktopStream);
+    
     const config = {
       twitchKey: twitchBtn?.classList.contains('active') ? 'using_env' : null,
       kickUrl: kickBtn?.classList.contains('active') ? 'using_env' : null,
       bitrate: qualitySelect.value === '1080p60' ? '6000k' : '4500k',
       codec: 'avc1.42001E',
+      sendAudio: sendAudio,
     };
     
     console.log('Config:', config);
@@ -2108,7 +2376,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     layersList = document.getElementById('layers-list')!;
     actionBtn = document.getElementById('action-btn')!;
     stopBtn = document.getElementById('stop-btn')!;
-    addLayerBtn = document.getElementById('add-layer-btn')!;
+    
+    const addLayerBtnEl = document.getElementById('add-layer-btn');
+    console.log('addLayerBtn element:', addLayerBtnEl);
+    if (addLayerBtnEl) {
+      addLayerBtn = addLayerBtnEl;
+    }
+    
     qualitySelect = document.getElementById('quality') as HTMLSelectElement;
     canvasWrapper = document.getElementById('canvas-wrapper')!;
     previewCanvas = document.createElement('canvas');
@@ -2116,11 +2390,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     redoBtn = document.getElementById('redo-btn')!;
     deleteBtn = document.getElementById('delete-btn')!;
     
+    console.log('Setting up addLayerBtn click handler, addLayerBtn:', addLayerBtn);
+    
     // Set up layer add button
-    addLayerBtn?.addEventListener('click', () => {
-      console.log('Add layer button clicked');
-      openDialog();
-    });
+    console.log('addLayerBtn check:', addLayerBtn, 'id:', addLayerBtn?.id);
+    if (addLayerBtn) {
+      addLayerBtn.addEventListener('click', (e) => {
+        console.log('Add layer button CLICKED!');
+        e.preventDefault();
+        openDialog();
+      });
+      console.log('click handler set');
+    } else {
+      console.error('ERROR: add-layer-btn NOT FOUND!');
+    }
     
     // Set up undo/redo/delete buttons
     undoBtn?.addEventListener('click', undo);
@@ -2149,47 +2432,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     actionBtn?.addEventListener('click', startStream);
     stopBtn?.addEventListener('click', stopStream);
     
-    // Initialize database
-    const dbInited = await initDatabase();
-    if (dbInited) {
-      // Load stream settings
-      const settings = getStreamSettings();
-      
-      // Apply platform selection
-      if (settings.platforms.includes('twitch')) {
-        twitchBtn?.classList.add('active');
-      }
-      if (settings.platforms.includes('kick')) {
-        kickBtn?.classList.add('active');
-      }
-      
-      // Apply resolution
-      if (settings.resolution) {
-        qualitySelect.value = settings.resolution;
-      }
-      
-      // Apply ingest
-      const ingestSelect = document.getElementById('ingest') as HTMLSelectElement;
-      if (ingestSelect && settings.twitchIngest) {
-        ingestSelect.value = settings.twitchIngest;
-      }
-      
-      console.log('Loaded stream settings:', settings);
-    }
-    
-    // Try load saved scenes from SQLite
-    console.log('Loading scenes from storage, db exists:', !!db);
-    const hasStored = loadFromStorage();
-    console.log('hasStored:', hasStored, 'scenes:', state.scenes.length);
-    if (hasStored && state.scenes.length > 0) {
-      console.log('Loaded saved scenes from SQLite:', state.scenes.length);
-    } else {
-      state.scenes = [{ id: 'default', name: 'Main', layers: [] }];
-      state.activeSceneId = 'default';
-      console.log('Created new default scene');
-    }
-    
     initKonva();
+    connectWebSocket();
     initScenesUI();
     renderScenesList();
     

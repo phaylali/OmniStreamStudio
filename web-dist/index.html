@@ -15,8 +15,7 @@
         display: block;
       }
     </style>
-    <script type="module" crossorigin src="/assets/index-RHMmKDQb.js"></script>
-    <link rel="modulepreload" crossorigin href="/assets/sql-CzUKSiNS.js">
+    <script type="module" crossorigin src="/assets/index-B5rE1rrq.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/index-CAVNMK7x.css">
   </head>
 
@@ -90,6 +89,8 @@
               <button class="dialog-tab" data-type="html">HTML</button>
               <button class="dialog-tab" data-type="text">Text</button>
               <button class="dialog-tab" data-type="widget">Widgets</button>
+              <button class="dialog-tab" data-type="media">Media</button>
+              <button class="dialog-tab" data-type="audio">Audio</button>
             </div>
             <div class="dialog-content">
               <!-- Image tab -->
@@ -184,6 +185,44 @@
                   </select>
                 </div>
                 <button class="dialog-action primary" id="add-widget-btn">Add Widget</button>
+              </div>
+              <!-- Media tab -->
+              <div class="dialog-panel" data-panel="media">
+                <div class="form-group">
+                  <label>Select Video or Audio File</label>
+                  <input type="file" id="media-file-input" accept="video/*,audio/*,.mp4,.webm,.mp3,.wav" class="hidden">
+                  <button class="dialog-action" id="select-media-btn" style="width: 100%;">Select File</button>
+                </div>
+                <div class="form-group">
+                  <label>Preview</label>
+                  <div id="media-preview" style="padding: 10px; background: var(--bg-input); border-radius: 4px; color: var(--text-secondary); font-size: 12px;">
+                    No file selected
+                  </div>
+                  <input type="hidden" id="media-src-input" value="">
+                </div>
+                <button class="dialog-action primary" id="add-media-btn">Add to Canvas</button>
+              </div>
+              <!-- Audio tab -->
+              <div class="dialog-panel" data-panel="audio">
+                <div class="form-group">
+                  <label>Microphone</label>
+                  <select id="audio-input-device">
+                    <option value="">None</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Desktop Audio</label>
+                  <button class="dialog-action" id="capture-desktop-audio-btn" style="width: 100%;">
+                    Select Desktop to Capture
+                  </button>
+                </div>
+                <div class="form-group">
+                  <label>Status</label>
+                  <div id="audio-preview" style="padding: 10px; background: var(--bg-input); border-radius: 4px; color: var(--text-secondary); font-size: 12px;">
+                    No audio selected
+                  </div>
+                </div>
+                <button class="dialog-action primary" id="add-audio-btn">Apply Audio Settings</button>
               </div>
             </div>
           </div>

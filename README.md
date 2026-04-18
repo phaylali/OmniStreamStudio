@@ -1,8 +1,8 @@
 # OmniStream Studio
 
-A web-based streaming studio for Twitch and Kick with GPU-accelerated encoding.
+A web-based streaming studio for Twitch and Kick with real-time canvas compositing.
 
-## Current Architecture
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -12,23 +12,28 @@ A web-based streaming studio for Twitch and Kick with GPU-accelerated encoding.
 │  │  Canvas  │     │   (WebM)   │     │  Client │ │
 │  └─────────────┘     └─────────────┘     └─────────┘ │
 └──────────────────────────────────────────┬──────┘
-                                             │ ws://localhost:6970
-┌──────────────────────────────────────────────┴──────┐
-│                   Node.js Server                   │
+                                              │
+                                              ▼
+                                    omnistream.json
+                                              │
+                                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                   Node.js Server (port 6970)           │
 │  ┌─────────────┐     ┌─────────────────────┐   │
 │  │ WebSocket  │────▶│   FFmpeg Pipeline  │───▶│ Twitch  │
-│  │  Server  │     │ (Muxer + Audio)   │   │ Kick   │
+│  │  Server   │     │ (RTMP relay)      │   │ Kick   │
 │  └─────────────┘     └─────────────────────┘   │
 └─────────────────────────────────────────────┘
 ```
 
 ## Features
 
-- **Studio V2 Layout** - Professional 3-column dashboard (Layers, Preview, Settings)
-- **Multi-Layer Compositing** - Image, Text, HTML overlays
-- **Browser Encoding** - MediaRecorder API (native WebM encoding)
-- **Dual Streaming** - Twitch and Kick simultaneously via FFmpeg `tee` muxer
-- **Resilient Pipeline** - Auto-generating silent audio track to comply with Twitch ingest requirements
+- **Scene System**: Multiple scenes with instant switching
+- **Layer Types**: Images, Text, HTML overlays, Media, Widgets
+- **Canvas Compositing**: Drag, resize, rotate layers with Konva.js
+- **Audio Support**: Microphone and desktop audio capture
+- **JSON Storage**: Human-readable data file (omnistream.json)
+- **Dual Streaming**: Stream to Twitch and Kick simultaneously
 
 ## Quick Start
 
@@ -41,7 +46,8 @@ A web-based streaming studio for Twitch and Kick with GPU-accelerated encoding.
 2. Start server: `node server.cjs`
 3. Start frontend: `bun run dev`
 4. Open http://localhost:6969
-5. Click **GO LIVE**
+5. Add layers (images, text, widgets)
+6. Click **GO LIVE**
 
 ## Running
 
@@ -53,17 +59,19 @@ node server.cjs
 bun run dev
 ```
 
+The JSON data file (`omnistream.json`) is created automatically and stores:
+- Scenes and their layers (position, size, rotation)
+- Text configurations
+- Image sources
+- Widget settings
+- Platform preferences
+
 ## Tech Stack
 
-- **UI**: Konva.js + TypeScript
+- **UI**: Konva.js + TypeScript + Vite
 - **Encoding**: MediaRecorder (WebM)
 - **Server**: Node.js WebSocket + FFmpeg
-- **Streaming**: FFmpeg `tee` multiplexer
-
-## Known Issues
-
-- **High Framerate / Visual Traces**: FFmpeg currently misinterprets the variable framerate from `MediaRecorder` as 1000 FPS (`1k fps`), causing frame duplication, bitrate starvation, and visual tearing/lag. This will be fixed in the next session by enforcing strict framerates (`-r 30`).
-See `DEV_NOTES.md` for detailed progression and technical debt.
+- **Storage**: JSON file
 
 ## License
 
