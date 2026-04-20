@@ -6,6 +6,49 @@ const STAGE_HEIGHT = 1080;
 const WS_URL = 'ws://localhost:6970';
 const PROXY_URL = 'http://localhost:6971/proxy?url=';
 
+// --- Frame Caching System (prevents black canvas on scene switch) ---
+class FrameCache {
+  private cache: Map<string, LayerConfig[]> = new Map();
+  private maxSize = 50;
+  
+  save(key: string, state: LayerConfig[]) {
+    const clone = JSON.parse(JSON.stringify(state));
+    this.cache.set(key, clone);
+    if (this.cache.size > this.maxSize) {
+      const firstKey = this.cache.keys().next().value;
+      this.cache.delete(firstKey);
+    }
+  }
+  
+  load(key: string): LayerConfig[] | null {
+    return this.cache.get(key) || null;
+  }
+  
+  has(key: string): boolean {
+    return this.cache.has(key);
+  }
+}
+
+const frameCache = new FrameCache();
+
+// --- Auto-Save System ---
+let saveTimeout: number | null = null;
+
+function debouncedSave() {
+  if (saveTimeout) clearTimeout(saveTimeout);
+  saveTimeout = window.setTimeout(() => {
+    saveToStorage();
+    saveTimeout = null;
+  }, 5000);
+}
+
+function cancelDebouncedSave() {
+  if (saveTimeout) {
+    clearTimeout(saveTimeout);
+    saveTimeout = null;
+  }
+}
+
 // --- State ---
 interface LayerConfig {
   id: string;
@@ -229,8 +272,14 @@ function switchScene(sceneId: string) {
     return;
   }
    
-  saveActiveScene();
-   
+  // CRITICAL: Save current scene to frame cache FIRST
+  if (state.activeSceneId && state.layers.length > 0) {
+    frameCache.save(state.activeSceneId, saveCurrentSceneLayers());
+  }
+  
+  // Immediate save to server
+  saveToStorage();
+    
   const targetScene = state.scenes.find(s => s.id === sceneId);
   if (!targetScene) {
     console.log('Target scene not found');
@@ -243,10 +292,11 @@ function switchScene(sceneId: string) {
    
   state.activeSceneId = sceneId;
   
+  // Clear existing layers from canvas
   state.layers.forEach(layer => layer.konvaNode?.destroy());
   state.layers = [];
   state.transformer.nodes([]);
-  
+   
   console.log('Loading', targetScene.layers.length, 'layers for scene:', sceneId);
    
   targetScene.layers.forEach(layerConfig => {
@@ -541,6 +591,9 @@ function addImageLayer(imageSrc: string) {
     layer.imageSrc = imageSrc;
     state.layers.push(layer);
     
+    // Auto-save after adding layer
+    debouncedSave();
+    
     // Select the new layer
     selectLayer(id);
     renderLayersList();
@@ -674,6 +727,7 @@ function addTextLayer(text: string, fontSize: number, color: string) {
   selectLayer(id);
   renderLayersList();
   updatePreview();
+  debouncedSave();
   console.log('Text layer added:', id);
 }
 
@@ -727,6 +781,16 @@ function addWidgetLayer(type: string, configVal: number, color: string, font: st
   konvaLabel.offsetY(konvaLabel.height() / 2);
   
   konvaLabel.on('click tap', () => selectLayer(id));
+  
+  // Double-click to reset countdown
+  if (type === 'countdown') {
+    konvaLabel.on('dblclick dbltap', () => {
+      layer.widgetConfig.startTime = Date.now();
+      console.log('Countdown reset!');
+      debouncedSave();
+    });
+  }
+  
   state.konvaLayer.add(konvaLabel);
   
   const layer = {
@@ -741,6 +805,7 @@ function addWidgetLayer(type: string, configVal: number, color: string, font: st
   selectLayer(id);
   renderLayersList();
   updatePreview();
+  debouncedSave();
 }
 
 // --- Media Layer (Video/Audio playback on canvas) ---
@@ -1103,12 +1168,33 @@ function renderLayersList() {
 // --- GIF Overlay for Countdown End ---
 const activeGifOverlays = new Map<string, { node: Konva.Image; img: HTMLImageElement }>();
 
-function showGifOverlay(layerId: string, gifPath: string) {
+function getGifPosition(position: string, stageX: number, stageY: number): { x: number; y: number } {
+  const padding = 50;
+  switch (position) {
+    case 'top-left': return { x: padding, y: padding };
+    case 'top-right': return { x: STAGE_WIDTH - padding, y: padding };
+    case 'top-center': return { x: STAGE_WIDTH / 2, y: padding };
+    case 'center-left': return { x: padding, y: STAGE_HEIGHT / 2 };
+    case 'center-right': return { x: STAGE_WIDTH - padding, y: STAGE_HEIGHT / 2 };
+    case 'bottom-left': return { x: padding, y: STAGE_HEIGHT - padding };
+    case 'bottom-right': return { x: STAGE_WIDTH - padding, y: STAGE_HEIGHT - padding };
+    case 'bottom-center': return { x: STAGE_WIDTH / 2, y: STAGE_HEIGHT - padding };
+    case 'center':
+    default: return { x: stageX, y: stageY };
+  }
+}
+
+function showGifOverlay(layerId: string, gifPath: string, gifPos: string = 'center') {
   const layer = state.layers.find(l => l.id === layerId);
   if (!layer || !state.konvaLayer) return;
   
-  // Position GIF at the same position as the countdown widget
-  const pos = layer.konvaNode.position();
+  // Get position from widget config or use center
+  const widgetConfig = (layer as any).widgetConfig;
+  const position = widgetConfig?.gifPos || gifPos;
+  
+  // Get the countdown widget position
+  const widgetPos = layer.konvaNode.position();
+  const pos = getGifPosition(position, widgetPos.x, widgetPos.y);
   
   const img = new Image();
   img.crossOrigin = 'anonymous';
@@ -1296,6 +1382,21 @@ editDialog.addEventListener('click', (e) => {
   if (e.target === editDialog) closeEditDialog();
 });
 
+// Keyboard handler for edit dialog
+document.addEventListener('keydown', (e) => {
+  const editDialog = document.getElementById('edit-layer-dialog');
+  if (editDialog && !editDialog.classList.contains('hidden')) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeEditDialog();
+    } else if (e.key === 'Enter' && (e.target as HTMLElement).tagName !== 'TEXTAREA') {
+      e.preventDefault();
+      saveEditDialog();
+      closeEditDialog();
+    }
+  }
+});
+
 let editingLayerId: string | null = null;
 let editingLayerType: string | null = null;
 
@@ -1310,7 +1411,7 @@ function openEditDialog(id: string) {
   const content = document.getElementById('edit-dialog-content')!;
   const node = layer.konvaNode;
   const textConfig = (layer as any).textConfig;
-  const widgetConfig = (layer as any).widgetConfig;
+  const widgetConfig = (layer as any).widgetConfig || {};
   
   if (layer.type === 'text' && node instanceof Konva.Text) {
     const txt = textConfig?.text ?? node.text();
@@ -1381,6 +1482,20 @@ function openEditDialog(id: string) {
           </span>
         </div>
         <input type="hidden" id="edit-widget-gif-src" value="${widgetConfig?.gifSrc || ''}" />
+        <div class="form-group" id="edit-widget-gif-position-group" style="display: ${widgetType === 'countdown' ? 'block' : 'none'};">
+          <label>GIF Position</label>
+          <select id="edit-widget-gif-position">
+            <option value="center" ${widgetConfig?.gifPos === 'center' ? 'selected' : ''}>Center</option>
+            <option value="top-left" ${widgetConfig?.gifPos === 'top-left' ? 'selected' : ''}>Top Left</option>
+            <option value="top-right" ${widgetConfig?.gifPos === 'top-right' ? 'selected' : ''}>Top Right</option>
+            <option value="top-center" ${widgetConfig?.gifPos === 'top-center' ? 'selected' : ''}>Top Center</option>
+            <option value="center-left" ${widgetConfig?.gifPos === 'center-left' ? 'selected' : ''}>Center Left</option>
+            <option value="center-right" ${widgetConfig?.gifPos === 'center-right' ? 'selected' : ''}>Center Right</option>
+            <option value="bottom-left" ${widgetConfig?.gifPos === 'bottom-left' ? 'selected' : ''}>Bottom Left</option>
+            <option value="bottom-right" ${widgetConfig?.gifPos === 'bottom-right' ? 'selected' : ''}>Bottom Right</option>
+            <option value="bottom-center" ${widgetConfig?.gifPos === 'bottom-center' ? 'selected' : ''}>Bottom Center</option>
+          </select>
+        </div>
       </div>
       <div class="form-group">
         <label>Font Family</label>
@@ -1530,6 +1645,7 @@ function saveEditDialog() {
     
     const audioSrcInput = document.getElementById('edit-widget-audio-src') as HTMLInputElement;
     const gifSrcInput = document.getElementById('edit-widget-gif-src') as HTMLInputElement;
+    const gifPosSelect = document.getElementById('edit-widget-gif-position') as HTMLSelectElement;
     
     layer.widgetConfig = {
       ...layer.widgetConfig,
@@ -1541,6 +1657,7 @@ function saveEditDialog() {
       bgShape: bgShapeSelect?.value || 'pill',
       audioSrc: audioSrcInput?.value || '',
       gifSrc: gifSrcInput?.value || '',
+      gifPos: gifPosSelect?.value || 'center',
     };
     
     const labelNode = node as Konva.Label;
@@ -2348,7 +2465,7 @@ function updateTimeWidgets() {
           
           // Show GIF
           if (wc.gifSrc) {
-            showGifOverlay(layer.id, wc.gifSrc);
+            showGifOverlay(layer.id, wc.gifSrc, wc.gifPos);
           }
         }
       }
